@@ -1,0 +1,32 @@
+# Turns deploy/compose.yaml into a separate test copy on the live PC: its own name, database and storage,
+# ports on 127.0.0.1 only (5434 database, 5680 n8n, 8001 agent, 8003 admin; the live system uses 5433, 5679, 8000,
+# 8002). Never a tunnel
+# (it would share Slack's traffic with the live system) and never the backup service (it would upload the copy's data
+# next to the real backups). deploy/restore.sh copy also unpublishes every n8n workflow in the copy.
+services:
+  postgres:
+    ports:
+      - "127.0.0.1:5434:5432"
+  n8n:
+    ports:
+      - "127.0.0.1:5680:5678"
+    environment:
+      N8N_EDITOR_BASE_URL: http://localhost:5680/
+      N8N_WEBHOOK_URL: http://localhost:5680/ # never the tunnel's address
+  agent:
+    ports:
+      - "127.0.0.1:8001:8000"
+  admin:
+    ports:
+      - "127.0.0.1:8003:8000"
+    environment:
+      # No Cloudflare gate on the copy: passes are signed with a key set made by scripts/mint_test_pass.py into
+      # .admin-test-keys.json (repository folder, git-ignored). The app starts with it only if .env.copy sets
+      # CF_TEAM_DOMAIN=test.invalid, a name that can never be real (SETUP section 14).
+      ADMIN_TEST_KEYS: /run/admin-test-keys.json
+    volumes:
+      - ../.admin-test-keys.json:/run/admin-test-keys.json:ro
+  backup:
+    profiles: ["never-in-the-copy"] # restore.sh still runs its image once, for the restore itself
+  tunnel:
+    profiles: ["never-in-the-copy"]

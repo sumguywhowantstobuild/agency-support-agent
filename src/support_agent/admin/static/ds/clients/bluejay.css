@@ -1,0 +1,21 @@
+[data-mode="productive"][data-client="bluejay"] {
+  --ds-brand-name: "Bluejay Funnel Co";
+  --ds-brand-short-mark: "BJ";
+  --ds-color-accent-default: #15171a;
+  --ds-color-accent-hover: #000000;
+  --ds-color-accent-text: #15171a;
+  --ds-color-focus-ring: #15171a;
+  --ds-color-brand-logo-from: #7a5bd6;
+  --ds-color-brand-logo-to: #2f6fd6;
+}
+
+[data-theme="dark"] [data-mode="productive"][data-client="bluejay"],
+[data-mode="productive"][data-client="bluejay"][data-theme="dark"] {
+  --ds-color-accent-default: #ecedef;
+  --ds-color-accent-hover: #ffffff;
+  --ds-color-accent-text: #ededef;
+  --ds-color-focus-ring: #ffffff;
+  --ds-color-brand-logo-from: #a68bf0;
+  --ds-color-brand-logo-to: #5b9df5;
+}
+

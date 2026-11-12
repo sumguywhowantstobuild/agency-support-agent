@@ -1,0 +1,28 @@
+{# Drafts today: server-drawn, classes only, since the security header refuses inline styles. The legend is
+   always there: the design system shows it instead of the end labels when they'd collide (ds-chart--legend) and on a phone. #}
+{# data-series: which line is whose, by client key. The page's one source for the short lines on the cards and rows (admin.js
+   keeps them matching whatever chart is on show). #}
+<div class="ds-chart{% if chart.legend %} ds-chart--legend{% endif %}{% if still %} ds-chart--still{% endif %}" data-series="{{ chart.series_of | tojson | forceescape }}">
+{% if chart.words %}
+  <p class="ds-chart__empty">{{ chart.words }}</p>
+{% else %}
+  <div class="ds-chart__plot">
+    <svg viewBox="0 0 400 100" preserveAspectRatio="none" aria-hidden="true" focusable="false">
+      <path class="ds-chart__grid" d="M0 25H400M0 50H400M0 75H400"/>
+      {% for line in chart.lines %}<path class="ds-chart__line ds-chart__line--{{ line.series }}" d="{{ line.path }}"/>
+      {% endfor %}
+    </svg>
+    {% for line in chart.lines %}<span class="ds-chart__end ds-chart__end--y{{ line.end }}" title="{{ line.name }}"><b class="ds-chart__end-number">{{ line.used }}</b>{{ line.name }}</span>
+    {% endfor %}
+  </div>
+  <div class="ds-chart__axis" aria-hidden="true">{% for label in chart.axis %}<span>{{ label }}</span>{% endfor %}</div>
+  <span class="ds-chart__legend" aria-hidden="true">{% for line in chart.lines %}<span><svg class="ds-chart__key" viewBox="0 0 18 2" aria-hidden="true"><path class="ds-chart__line ds-chart__line--{{ line.series }}" d="M0 1H18"/></svg>{{ line.name }}</span>{% endfor %}</span>
+  <div class="ds-chart__table">
+    <table>
+      <caption>Drafts today, by the hour ending at each time</caption>
+      <thead><tr><th scope="col">Hour ending</th>{% for line in chart.lines %}<th scope="col">{{ line.name }}</th>{% endfor %}</tr></thead>
+      <tbody>{% for hour in chart.hours %}{% set row = loop.index0 %}<tr><th scope="row">{{ hour }}</th>{% for line in chart.lines %}<td>{{ line.counts[row] }}</td>{% endfor %}</tr>{% endfor %}</tbody>
+    </table>
+  </div>
+{% endif %}
+</div>

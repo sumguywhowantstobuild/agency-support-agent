@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title or "Staff" }} · Bluejay support admin{% endblock %}
+{% block content %}
+<header class="ds-page-header">
+  <div class="ds-page-header ds-page-header--section">
+    <h1 class="ds-page-header__title" tabindex="-1">Staff</h1>
+    <span class="ds-page-header__spacer"></span>
+    <a class="ds-button ds-button--accent ds-page-header__add" href="/staff/new"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add staff</a>
+    {% include "theme_button.html" %}
+  </div>
+</header>
+<div class="ds-page-header ds-page-header--section">
+  <h2 class="ds-page-header__heading">Everyone <span class="ds-page-header__count" id="staff-count">{{ members | length }}</span></h2>
+</div>
+{# The list is a region of its own, so a change made in the panel can refresh it in place (admin.js). #}
+<div id="results">
+<div class="ds-card ds-card--flush">
+  <div class="ds-table__wrap">
+    {# Each row is one target: the name is its real link, stretched over the row (a page without the script follows it). #}
+    <table class="ds-table ds-table--fixed ds-table--rows" role="table">
+      <caption class="ds-table__caption">Staff</caption>
+      <colgroup><col class="ds-table__col--w36"><col class="ds-table__col--w22"><col class="ds-table__col--w17"><col class="ds-table__col--w17"><col></colgroup>
+      <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col">Name</th><th role="columnheader" scope="col">Work email</th><th role="columnheader" scope="col">Slack member ID</th><th role="columnheader" scope="col">Status</th><th role="columnheader" scope="col" aria-label="Open"></th></tr></thead>
+      <tbody role="rowgroup">
+      {% for member in members %}
+        <tr role="row">
+          <td role="cell" class="ds-table__cell--primary"><span class="ds-table__initial" aria-hidden="true">{{ member.name[:1] | upper }}</span><a class="ds-table__name{% if not member.active %} ds-table__name--dim{% endif %}" href="/staff/{{ member.id }}">{{ member.name }}</a></td>
+          <td role="cell" data-label="Work email"><!--email_off-->{{ member.email }}<!--/email_off--></td>
+          <td role="cell" data-label="Slack member ID"><span class="ds-table__id">{{ member.slack_user_id }}</span></td>
+          {% if member.active %}
+          <td role="cell" class="ds-table__cell--status"><span class="ds-table__status"><span class="ds-status ds-status--ok"><svg aria-hidden="true"><use href="#i-check"/></svg><span class="ds-status__label">Active</span></span></span></td>
+          {% else %}
+          <td role="cell" class="ds-table__cell--status"><span class="ds-table__status"><span class="ds-status ds-status--idle"><svg aria-hidden="true"><use href="#i-pause"/></svg><span class="ds-status__label">Deactivated</span></span></span></td>
+          {% endif %}
+          <td role="cell" class="ds-table__cell--go"><svg class="ds-table__go" aria-hidden="true"><use href="#i-chev"/></svg></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+</div>
+{# The panel named by `panel` (a member's or Add staff), open over the list; with none, a closed empty one for admin.js to
+   fill. Then the page's one toast and its two live regions. #}
+{% if panel %}{% include panel %}{% else %}<dialog class="ds-sheet" id="panel"></dialog>{% endif %}
+{% include "toast.html" %}
+{% endblock %}

@@ -1,0 +1,31 @@
+{
+  "display_information": {
+    "name": "Bluejay Support (DEV)",
+    "description": "Drafts answers to client tech tickets. A person approves every reply.",
+    "background_color": "#1d4ed8"
+  },
+  "features": {
+    "bot_user": {
+      "display_name": "Bluejay Support (DEV)",
+      "always_online": false
+    }
+  },
+  "oauth_config": {
+    "scopes": {
+      "bot": ["chat:write", "groups:history", "groups:read"]
+    }
+  },
+  "settings": {
+    "org_deploy_enabled": false,
+    "event_subscriptions": {
+      "request_url": "https://YOUR_N8N_HOST/webhook/79fee83d-dee4-406a-aa72-129aaf557c1e/webhook",
+      "bot_events": ["message.groups"]
+    },
+    "interactivity": {
+      "is_enabled": true,
+      "request_url": "https://YOUR_N8N_HOST/webhook/slack-interactions"
+    },
+    "socket_mode_enabled": false,
+    "token_rotation_enabled": false
+  }
+}

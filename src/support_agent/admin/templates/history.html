@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}History · Bluejay support admin{% endblock %}
+{% block content %}
+<header class="ds-page-header">
+  <div class="ds-page-header ds-page-header--section">
+    <h1 class="ds-page-header__title">History</h1>
+    <span class="ds-page-header__spacer"></span>
+    {% include "theme_button.html" %}
+  </div>
+</header>
+{# Show applies the picks: picking alone never reloads the page (WCAG 2.2 3.2.2 On Input, keyboard users). #}
+<form class="ds-page-header ds-page-header--section" method="get" action="/history">
+  <h2 class="ds-page-header__heading">Changes</h2>
+  <span class="ds-page-header__spacer"></span>
+  <span class="ds-select ds-select--compact">
+    <label class="ds-form-field__label ds-form-field__label--hidden" for="kind">Kind of change</label>
+    <select class="ds-select__control" id="kind" name="kind"><button><selectedcontent></selectedcontent></button>
+      <option value=""{% if not kind %} selected{% endif %}>All changes</option>
+      {% for value, words in kinds.items() %}
+      <option value="{{ value }}"{% if kind == value %} selected{% endif %}>{{ words }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <span class="ds-select ds-select--compact">
+    <label class="ds-form-field__label ds-form-field__label--hidden" for="client">Client</label>
+    <select class="ds-select__control" id="client" name="client"><button><selectedcontent></selectedcontent></button>
+      <option value=""{% if not client %} selected{% endif %}>All clients</option>
+      {% for row in clients %}
+      <option value="{{ row.client_key }}"{% if client == row.client_key %} selected{% endif %}>{{ row.display_name }}{% if row.status == "removed" %} (removed){% endif %}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <span class="ds-select ds-select--compact">
+    <label class="ds-form-field__label ds-form-field__label--hidden" for="person">Person</label>
+    <select class="ds-select__control" id="person" name="person"><button><selectedcontent></selectedcontent></button>
+      <option value=""{% if not person %} selected{% endif %}>Everyone</option>
+      {% for name in people %}
+      <option value="{{ name }}"{% if person == name %} selected{% endif %}>{{ name }}</option>
+      {% endfor %}
+    </select>
+  </span>
+  <button type="submit" class="ds-button">Show</button>
+</form>
+{% if days %}
+{# Each day under its own heading, the time in a column of its own; a day that runs over two pages has its heading on both. #}
+<div class="ds-card ds-card--flush">
+  {% for heading, items in days %}
+  <h3 class="ds-card__history-day">{{ heading }}{% if loop.first %} · {{ zone_name }} time{% endif %}</h3>
+  <ol class="ds-card__history">
+    {% for change, said, stamp, clock in items %}
+    <li class="ds-card__history-item"><time class="ds-card__history-time" datetime="{{ stamp }}">{{ clock }}</time><span><b>{{ change.staff_name }}</b> <!--email_off-->{{ said }}<!--/email_off--></span></li>
+    {% endfor %}
+  </ol>
+  {% endfor %}
+</div>
+{% else %}
+<div class="ds-card ds-card--recent">
+  <p>{% if kind or client or person %}No changes match.{% else %}No changes yet.{% endif %}</p>
+</div>
+{% endif %}
+{% if newer or older %}
+<nav class="ds-page-header ds-page-header--section" aria-label="Pages">
+  {% if newer %}<a class="ds-button" href="{{ newer }}">Newer changes</a>{% endif %}
+  <span class="ds-page-header__spacer"></span>
+  {% if older %}<a class="ds-button" href="{{ older }}">Older changes</a>{% endif %}
+</nav>
+{% endif %}
+{% endblock %}

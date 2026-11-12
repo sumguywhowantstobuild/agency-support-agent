@@ -1,0 +1,1585 @@
+{
+  "name": "Ticket approval",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "slack-interactions",
+        "responseMode": "responseNode",
+        "options": {
+          "rawBody": true
+        }
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2.2,
+      "position": [
+        -2000,
+        48
+      ],
+      "id": "a2578910-b71d-4d5b-a7a5-edd2d04879c0",
+      "name": "Slack click",
+      "webhookId": "f90d68e3-a92d-4a66-88f6-9bcd009eba3a"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slack signs the exact bytes it sends, so the database check gets those bytes (base64), never a re-encoded form,\n// with Slack's two headers. Over 256 KiB (a real click or pop-up is a few KiB) the body is left out, so the check\n// refuses it. Missing parts become empty text, which the check refuses too.\nconst item = $input.first();\nconst headers = item.json.headers ?? {};\nlet bodyB64 = '';\nif (item.binary?.data) {\n  const body = await this.helpers.getBinaryDataBuffer(0, 'data');\n  if (body.length <= 262144) bodyB64 = body.toString('base64');\n}\nreturn [{ json: {\n  timestamp: String(headers['x-slack-request-timestamp'] ?? ''),\n  signature: String(headers['x-slack-signature'] ?? ''),\n  body_b64: bodyB64,\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1776,
+        48
+      ],
+      "id": "68874ca8-f3f6-49fd-b244-e7e8c2fc5471",
+      "name": "Read body"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Is this click from Slack? true only for a body Slack signed with our secret within 5 minutes (migration 016);\n-- false for anything else. An error here (no secret set, database trouble) takes the \"can't check\" path.\n-- Values in order: 1 timestamp header, 2 signature header, 3 the body exactly as sent (base64)\nselect verify_slack_request($1, $2, $3) as verified;",
+        "options": {
+          "queryReplacement": "={{ [ $json.timestamp, $json.signature, $json.body_b64 ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -1552,
+        48
+      ],
+      "id": "528042c5-ecdd-449b-87c9-10df8e6c9214",
+      "name": "Check signature",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "26b14852-2baa-47e2-9f39-dd5e13d4683c",
+              "leftValue": "={{ $json.verified === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1328,
+        0
+      ],
+      "id": "27f95bc6-cde8-4a95-9d30-a56bc7dc42e1",
+      "name": "Genuine?"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -1104,
+        0
+      ],
+      "id": "e279951b-33f4-4d80-ab89-634d6e837d27",
+      "name": "Answer Slack"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The click itself, read from the same bytes the database just checked: form data with one \"payload\" field holding\n// a JSON object. Anything else ends the run quietly (Slack already got its answer). Read by hand: n8n's code\n// sandbox has no URLSearchParams. In form data \"+\" is a space, and %XX is a byte of UTF-8 text.\nconst body = Buffer.from($('Read body').first().json.body_b64, 'base64').toString('utf8');\nconst decode = (text) => decodeURIComponent(text.replace(/\\+/g, ' '));\nconst payloads = [];\nfor (const pair of body.split('&')) {\n  const at = pair.indexOf('=');\n  let name;\n  let value;\n  try {\n    name = decode(at < 0 ? pair : pair.slice(0, at));\n    value = decode(at < 0 ? '' : pair.slice(at + 1));\n  } catch {\n    return []; // a broken %XX\n  }\n  if (name === 'payload') payloads.push(value);\n}\nif (payloads.length !== 1) return [];\nlet click;\ntry {\n  click = JSON.parse(payloads[0]);\n} catch {\n  return [];\n}\nif (!click || typeof click !== 'object' || Array.isArray(click)) return [];\nreturn [{ json: click }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        0
+      ],
+      "id": "1a3685b5-a5ba-424b-a017-5bf0bb8c3f92",
+      "name": "Parse click"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 401
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -1104,
+        144
+      ],
+      "id": "dc0242d9-b38f-4847-ae57-4ca95197acca",
+      "name": "Refuse"
+    },
+    {
+      "parameters": {
+        "respondWith": "noData",
+        "options": {
+          "responseCode": 503
+        }
+      },
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.5,
+      "position": [
+        -1328,
+        288
+      ],
+      "id": "7d2d88df-90b5-4d77-b124-b149a35ffbba",
+      "name": "Can't check"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The database couldn't check the click (no secret set, or the database is in trouble). Slack has shown the clicker\n// an error; failing here sends the Alerts workflow's message to #support-alerts. Nothing was done.\nthrow new Error(\"Button clicks can't be checked right now (the database check failed), so nothing was done. \" +\n  'Slack showed the clicker an error. See docs/SETUP.md section 9 (Slack signing secret).');"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -1104,
+        288
+      ],
+      "id": "2795f2ac-eb6a-4c2a-8308-21f4791ac4ea",
+      "name": "Alert: can't check clicks"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "2028f3e8-deab-439d-b21f-2c5643340922",
+              "name": "support_queue_channel",
+              "value": "PASTE_SUPPORT_QUEUE_CHANNEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "4803eb4a-b058-4cf1-80b5-bf700b5c762b",
+              "name": "slack_workspace_url",
+              "value": "PASTE_SLACK_WORKSPACE_URL",
+              "type": "string"
+            },
+            {
+              "id": "f3464fba-e26b-47ef-8a0a-d47834f55a46",
+              "name": "embedding_model",
+              "value": "text-embedding-3-small",
+              "type": "string"
+            },
+            {
+              "id": "9a69e7e7-089f-437a-a84d-be86d22de346",
+              "name": "alerts_channel",
+              "value": "PASTE_ALERTS_CHANNEL_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -1104,
+        48
+      ],
+      "id": "62a7ba50-0644-441c-af2f-cdef19810b1b",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// What did the support person click, and may they? Only a click the database confirmed as genuinely from Slack gets\n// here. Returns one item with a \"kind\": open_edit, decide (approve, send an edit, take over), open_limit and\n// set_limit (the \"Change limit\" button on a limit alert, then its pop-up) or not_staff.\n// Anything else (an unknown button, a malformed click) returns nothing, which ends the run quietly.\nconst s = $('Settings').first().json;\nfor (const [name, value] of Object.entries(s)) {\n  if (!String(value ?? '').trim() || String(value).startsWith('PASTE_')) {\n    throw new Error(`Settings: ${name} is not filled in. Nothing was done.`);\n  }\n}\nconst p = $('Parse click').first().json; // the click, from the bytes the database verified\nconst user = p.user?.id ?? '';\nconst UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;\nconst CLIENT_KEY = /^[a-z0-9][a-z0-9-]{0,63}$/;\nif (!/^[UW][A-Z0-9]{2,}$/.test(user)) return [];\n\nlet click;\nif (p.type === 'block_actions' && p.actions?.[0]?.action_id === 'change_limit') {\n  const clientKey = p.actions[0].value ?? '';\n  if (!CLIENT_KEY.test(clientKey)) return [];\n  click = { action: 'open_limit', client_key: clientKey, trigger_id: p.trigger_id ?? '' };\n} else if (p.type === 'block_actions') {\n  const a = p.actions?.[0] ?? {};\n  const statusFor = { approve: 'approved', take_over: 'taken_over', edit: '' };\n  if (!(a.action_id in statusFor) || !UUID.test(a.value ?? '')) return [];\n  click = { action: a.action_id, draft_id: a.value, status: statusFor[a.action_id], trigger_id: p.trigger_id ?? '', reply: '' };\n} else if (p.type === 'view_submission' && p.view?.callback_id === 'edit_reply') {\n  const draftId = p.view.private_metadata ?? '';\n  const reply = String(p.view.state?.values?.reply?.reply_text?.value ?? '').trim();\n  if (!UUID.test(draftId) || !reply) return [];\n  click = { action: 'send_edit', draft_id: draftId, status: 'edited', trigger_id: '', reply };\n} else if (p.type === 'view_submission' && p.view?.callback_id === 'change_limit') {\n  // Slack's number box already allows only 1 to 200; checked again here and once more in the database.\n  const clientKey = p.view.private_metadata ?? '';\n  const limit = String(p.view.state?.values?.limit?.limit_value?.value ?? '').trim();\n  if (!CLIENT_KEY.test(clientKey) || !/^\\d{1,3}$/.test(limit) || +limit < 1 || +limit > 200) return [];\n  click = { action: 'set_limit', client_key: clientKey, new_limit: Number(limit) };\n} else {\n  return [];\n}\n\nconst kindFor = { edit: 'open_edit', open_limit: 'open_limit', set_limit: 'set_limit' };\nconst kind = !$('Check staff').first().json.is_staff ? 'not_staff' : kindFor[click.action] ?? 'decide';\n// Notes to the person who clicked go where they clicked: limit alerts sit in the alerts channel.\nconst replyChannel = click.action in { open_limit: 1, set_limit: 1 } ? s.alerts_channel : s.support_queue_channel;\nreturn [{ json: { kind, user_id: user, queue_channel: s.support_queue_channel, reply_channel: replyChannel, ...click } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -656,
+        48
+      ],
+      "id": "f5e985f1-1d92-43ab-9d0d-634ea616f2ac",
+      "name": "Read click"
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "aeb22868-d60b-430c-b6b2-45d2b2fa387c",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "open_edit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "open_edit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "750c436b-6cf5-4f2f-9af0-756fd116c6e0",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "decide",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "decide"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "9d6ab201-68d2-4f4a-8063-78dc4d9a595c",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "not_staff",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "not_staff"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "7c791e12-2d17-4442-b512-e1fc88b3747c",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "open_limit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "open_limit"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "16eec129-9118-4156-bc09-e041ef397cad",
+                    "leftValue": "={{ $json.kind }}",
+                    "rightValue": "set_limit",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "set_limit"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        -432,
+        32
+      ],
+      "id": "e34fafd5-6a91-47a4-bf28-0a089db263b0",
+      "name": "Route"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.reply_channel }}"
+        },
+        "text": "Only the Bluejay support team can use these buttons. Nothing was done.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "ephemeral": {
+            "ephemeralValues": {
+              "user": {
+                "__rl": true,
+                "mode": "id",
+                "value": "={{ $json.user_id }}"
+              }
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        -208,
+        240
+      ],
+      "id": "430153c2-fec0-4e42-bca3-b03ab5898374",
+      "name": "Not on the team",
+      "webhookId": "13474cc9-e897-4d8f-bb22-ecddac41db84",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The reply to put in the edit box, only while the draft can still be sent (pending and its ticket's newest draft).\n-- Always one row: reply is empty when the draft was already handled or replaced.\nselect (\n  select d.draft->>'client_reply'\n  from drafts d\n  where d.id = $1::uuid\n    and d.status = 'pending'\n    and d.created_at = (select max(n.created_at) from drafts n where n.ticket_id = d.ticket_id)\n) as reply;",
+        "options": {
+          "queryReplacement": "={{ [ $json.draft_id ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -208,
+        -336
+      ],
+      "id": "ad20c0f4-c15e-4103-9bc1-7829d98a3b32",
+      "name": "Load reply",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "f39fa7db-bbba-40d5-a536-cc95faa8c5ef",
+              "leftValue": "={{ !!$json.reply }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        16,
+        -336
+      ],
+      "id": "eb8c1244-330b-46cb-8e1f-ffc257bfcd18",
+      "name": "Can still send?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The edit box: the draft's reply, ready to change. Sending it comes back here as a \"view_submission\" click.\nconst click = $('Read click').first().json;\nconst view = {\n  type: 'modal',\n  callback_id: 'edit_reply',\n  private_metadata: click.draft_id, // which draft the edited reply belongs to\n  title: { type: 'plain_text', text: 'Edit the reply' },\n  submit: { type: 'plain_text', text: 'Send to client' },\n  close: { type: 'plain_text', text: 'Cancel' },\n  blocks: [\n    {\n      type: 'input',\n      block_id: 'reply',\n      label: { type: 'plain_text', text: 'Reply to the client' },\n      element: {\n        type: 'plain_text_input',\n        action_id: 'reply_text',\n        multiline: true,\n        max_length: 3000,\n        initial_value: $input.first().json.reply,\n      },\n    },\n    { type: 'context', elements: [{ type: 'mrkdwn', text: \"Goes to the client's thread when you press Send.\" }] },\n  ],\n};\nreturn [{ json: { body: JSON.stringify({ trigger_id: click.trigger_id, view }) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        -336
+      ],
+      "id": "9ef756b7-9659-4f6f-9c4d-673296814764",
+      "name": "Edit box"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/views.open",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 2500
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        464,
+        -336
+      ],
+      "id": "7f258b22-ba5d-4b9e-8729-27996ab527ce",
+      "name": "Open edit box",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Slack answers \"ok\": false instead of an error code when it refuses, so check it here and fail loudly.\nconst r = $input.first().json;\nif (!r.ok) throw new Error(`Slack refused to open the pop-up: ${r.error ?? 'no reason given'}`);\nreturn [];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        912,
+        -336
+      ],
+      "id": "d468b8dd-fc2c-412e-9bf0-01f385e7246f",
+      "name": "Check Slack's answer"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- First click wins. The draft changes only if it is still open and is its ticket's newest draft: approve and edit\n-- need \"pending\"; take over also works on \"agent unavailable\", \"limit reached\" and \"client paused\". The status\n-- check sits in this statement's own WHERE, so a second click that arrives at the same moment waits, re-checks and\n-- finds it already decided (no row back).\n-- Values in order: 1 draft id, 2 new status, 3 Slack user who clicked, 4 the edited reply ('' = send the draft's\n-- own reply)\nupdate drafts d\nset status = $2,\n    decided_by = $3,\n    decided_at = now(),\n    draft = case when $2 = 'taken_over' then d.draft\n                 else d.draft || jsonb_build_object('sent_reply', coalesce(nullif($4, ''), d.draft->>'client_reply')) end\nfrom tickets t, client_map c\nwhere d.id = $1::uuid\n  and (d.status = 'pending' or ($2 = 'taken_over' and d.status in ('agent_unavailable', 'limit_reached', 'client_paused')))\n  and d.created_at = (select max(n.created_at) from drafts n where n.ticket_id = d.ticket_id)\n  and t.id = d.ticket_id\n  and c.channel_id = t.channel_id\nreturning d.id as draft_id, d.ticket_id, d.status, d.queue_ts, d.draft->>'sent_reply' as sent_reply,\n          d.draft->>'likely_cause' as likely_cause, d.draft->'fix_steps' as fix_steps,\n          t.channel_id, t.thread_ts, c.display_name;",
+        "options": {
+          "queryReplacement": "={{ [ $json.draft_id, $json.status, $json.user_id, $json.reply ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -208,
+        48
+      ],
+      "id": "17727a4b-35e1-4bc3-a90e-0941f4ccf642",
+      "name": "Decide",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "cc167b96-4be7-43ce-bef6-8b907ac23609",
+              "leftValue": "={{ !!$json.draft_id }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        16,
+        48
+      ],
+      "id": "f998b7e2-584e-449f-ad07-435f73bbd2fb",
+      "name": "Decided?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Read click').first().json.queue_channel }}"
+        },
+        "text": "This draft was already handled by someone else, or replaced by a newer draft. Nothing was sent.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "ephemeral": {
+            "ephemeralValues": {
+              "user": {
+                "__rl": true,
+                "mode": "id",
+                "value": "={{ $('Read click').first().json.user_id }}"
+              }
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        -144
+      ],
+      "id": "57b743f5-297e-4009-9116-0d2858793024",
+      "name": "Already handled",
+      "webhookId": "b9131a27-2674-4a64-b3c7-11ffd92e53af",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "dc551409-fe2e-4a3e-b138-892a7586a571",
+              "leftValue": "={{ $json.status !== 'taken_over' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        240,
+        96
+      ],
+      "id": "6b692cb7-8c97-4511-93a6-4862e23dc1e3",
+      "name": "Send it?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $json.channel_id }}"
+        },
+        "text": "={{ $json.sent_reply.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $json.thread_ts }}"
+            }
+          },
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        464,
+        32
+      ],
+      "id": "f12d5e9a-ae2a-49e9-97ac-9210195dab7d",
+      "name": "Send reply",
+      "webhookId": "fbd53aec-9f19-4e06-9e30-f205e721132a",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The reply didn't reach the client: put the draft back to \"pending\" so someone can try again.\n-- Values in order: 1 draft id, 2 what Slack said (passed through for the note in #support-queue)\nupdate drafts\nset status = 'pending', decided_by = null, decided_at = null, draft = draft - 'sent_reply'\nwhere id = $1::uuid and status in ('approved', 'edited')\nreturning id as draft_id, $2::text as slack_error;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide').first().json.draft_id, String($json.error ?? 'no reason given').slice(0, 200) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        912,
+        288
+      ],
+      "id": "8b11597b-1004-4192-bcd2-6786997fbb61",
+      "name": "Reopen draft",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "text": "=:warning: The reply couldn't be sent to the client (Slack said: {{ String($json.slack_error ?? 'no reason given').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}). The draft is open again: try once more, or answer in the client's thread yourself.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Decide').first().json.queue_ts }}"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1360,
+        288
+      ],
+      "id": "288ae53b-d230-4aaf-9970-ff920971185e",
+      "name": "Note: not sent",
+      "webhookId": "753df9ae-b4b0-4bb9-a31b-207604a5aca5",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "https://slack.com/api/conversations.history",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "channel",
+              "value": "={{ $('Settings').first().json.support_queue_channel }}"
+            },
+            {
+              "name": "latest",
+              "value": "={{ $('Decide').first().json.queue_ts }}"
+            },
+            {
+              "name": "inclusive",
+              "value": "true"
+            },
+            {
+              "name": "limit",
+              "value": "1"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 5000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        912,
+        -144
+      ],
+      "id": "b7ad3bfa-1d68-4821-9225-22df9f823d16",
+      "name": "Get card",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "// The card once a person has decided: everything it showed, minus the buttons, plus who did what. If Slack didn't\n// return the card, a short version takes its place.\nconst d = $('Decide').first().json;\nif (!d.queue_ts) return []; // no card on record, so nothing to update\nconst who = `<@${$('Read click').first().json.user_id}>`;\n\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst MAX = 2900; // Slack allows 3000 characters per section\nconst cut = (t) => (t.length > MAX ? t.slice(0, MAX - 1) + '…' : t);\nconst quote = (t) => esc(t).split('\\n').map((line) => '> ' + line).join('\\n');\n\nconst res = $input.first().json; // Slack's copy of the card\nconst found = res.ok && res.messages?.[0]?.ts === d.queue_ts ? (res.messages[0].blocks ?? []) : [];\nconst blocks = found.filter((b) => b.type !== 'actions');\nif (!blocks.length) blocks.push({ type: 'section', text: { type: 'mrkdwn', text: `*🎫 ${esc(d.display_name)}*` } });\n\nconst outcome = {\n  approved: `:white_check_mark: *Approved and sent* by ${who}`,\n  edited: `:pencil2: *Edited and sent* by ${who}`,\n  taken_over: `:raising_hand: *Taken over* by ${who}, who will answer the client.`,\n}[d.status];\nif (d.status === 'edited') {\n  blocks.push({ type: 'section', text: { type: 'mrkdwn', text: cut(`*Reply sent (edited):*\\n${quote(d.sent_reply)}`) } });\n}\nblocks.push({ type: 'context', elements: [{ type: 'mrkdwn', text: outcome }] });\nconst notice = { approved: 'Approved and sent', edited: 'Edited and sent', taken_over: 'Taken over by a person' }[d.status];\nreturn [{ json: { text: notice, blocks: JSON.stringify({ blocks }) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1360,
+        -144
+      ],
+      "id": "565be06b-f362-47dc-904e-04be190434d2",
+      "name": "Done card"
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "ts": "={{ $('Decide').first().json.queue_ts }}",
+        "messageType": "block",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "updateFields": {},
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1584,
+        -144
+      ],
+      "id": "98dac32f-33b8-49f4-aa99-b9ef4ee4bdb8",
+      "name": "Update card",
+      "webhookId": "678b3f99-7f20-4ff4-a72d-496e7ea2e812",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// The solved ticket, saved for the agent's \"similar past tickets\" search: what was wrong, how it was fixed and what\n// the client was told. The client's own message isn't saved (it can hold names). save_past_ticket also refuses any\n// text that still holds an email address or a phone number.\nconst d = $('Decide').first().json;\nconst s = $('Settings').first().json;\nconst steps = (Array.isArray(d.fix_steps) ? d.fix_steps : []).map((x, i) => `${i + 1}. ${x}`).join('\\n');\nconst title = String(d.likely_cause ?? '').split(/(?<=[.!?])\\s/)[0].slice(0, 150) || 'Solved ticket';\nconst content = `Cause: ${d.likely_cause}\\n\\nFix:\\n${steps || '(no steps recorded)'}\\n\\nReply sent to the client:\\n${d.sent_reply}`;\nconst url = `${s.slack_workspace_url.replace(/\\/+$/, '')}/archives/${d.channel_id}/p${d.thread_ts.replace('.', '')}`;\nreturn [{ json: { ticket_id: d.ticket_id, title, content, url } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        688,
+        96
+      ],
+      "id": "eee11511-fd31-4f86-b602-1c3f23d60ff8",
+      "name": "Past ticket text"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Settings').first().json.embedding_model, input: $('Past ticket text').first().json.content }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1360,
+        96
+      ],
+      "id": "ad968410-fc4f-45c6-8722-8e759e550a94",
+      "name": "Embed",
+      "credentials": {
+        "openAiApi": {
+          "id": "PASTE_CREDENTIAL_ID_N8N_KB_SYNC",
+          "name": "n8n-kb-sync"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Save the solved ticket for the agent's search, through the one function that forces the \"past_ticket\" label\n-- and refuses emails and phone numbers (migration 004). It takes the approved draft's id and refuses a draft the agent marked as naming a customer (015).\nselect save_past_ticket($1::uuid, $2, $3, $4, $5::vector) as saved;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide').first().json.draft_id,$('Past ticket text').first().json.title, $('Past ticket text').first().json.content, $('Past ticket text').first().json.url, JSON.stringify($json.data[0].embedding) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1584,
+        96
+      ],
+      "id": "3ff67cbc-4034-4fb6-9a77-f0b277cc0bc6",
+      "name": "Save past ticket",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "text": "=:information_source: Sent to the client, but not saved as a past ticket for the agent to learn from ({{ String($json.message ?? 'no reason given').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') }}).",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Decide').first().json.queue_ts }}"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1808,
+        96
+      ],
+      "id": "0fca358d-6d0f-48f7-8661-947d90a95fce",
+      "name": "Note: past ticket not saved",
+      "webhookId": "0d9bba91-6538-4bf3-bf03-517ed79b48f6",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The client's limit now, for the pop-up. No row (an unknown client) ends the run quietly.\nselect display_name, drafts_per_hour from client_map where client_key = $1;",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_key ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        16,
+        432
+      ],
+      "id": "4a17b8dc-092d-465d-a189-7218f15223bb",
+      "name": "Load limit",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// The \"Change limit\" pop-up. Slack's number box accepts only a whole number from 1 to 200. Saving comes back\n// here as a \"view_submission\" click, and the database checks the number again.\nconst click = $('Read click').first().json;\nconst c = $input.first().json;\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst view = {\n  type: 'modal',\n  callback_id: 'change_limit',\n  private_metadata: click.client_key, // which client the new limit is for\n  title: { type: 'plain_text', text: 'Change the limit' },\n  submit: { type: 'plain_text', text: 'Save' },\n  close: { type: 'plain_text', text: 'Cancel' },\n  blocks: [\n    { type: 'section', text: { type: 'mrkdwn', text: `*${esc(c.display_name)}* can have *${c.drafts_per_hour}* drafts an hour.` } },\n    {\n      type: 'input',\n      block_id: 'limit',\n      label: { type: 'plain_text', text: 'New limit (drafts per hour)' },\n      element: {\n        type: 'number_input',\n        action_id: 'limit_value',\n        is_decimal_allowed: false,\n        min_value: '1',\n        max_value: '200',\n        initial_value: String(Math.min(c.drafts_per_hour, 200)), // the admin may have set more than Slack allows here\n      },\n    },\n    { type: 'context', elements: [{ type: 'mrkdwn', text: 'Applies at once and is logged with your name.' }] },\n  ],\n};\nreturn [{ json: { body: JSON.stringify({ trigger_id: click.trigger_id, view }) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        432
+      ],
+      "id": "b2dc8f88-1249-4627-b1f1-24eee7721873",
+      "name": "Limit box"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://slack.com/api/views.open",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "slackApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ $json.body }}",
+        "options": {
+          "timeout": 2500
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        464,
+        432
+      ],
+      "id": "6e976bfb-4a53-44c4-9dc0-83441e40180a",
+      "name": "Open limit box",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Staff saved a new limit in the pop-up. The database accepts only a known client and 1 to 200, and logs who\n-- changed it, when, and the old and new number.\nselect * from set_draft_limit($1, $2::integer, $3);",
+        "options": {
+          "queryReplacement": "={{ [ $json.client_key, $json.new_limit, $json.user_id ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        16,
+        624
+      ],
+      "id": "9c39441a-8f5d-444f-af0a-1c21641c2502",
+      "name": "Set limit",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.alerts_channel }}"
+        },
+        "text": "={{ $json.limit_before === $json.limit_after ? ':information_source: <@' + $('Read click').first().json.user_id + '> kept *' + $json.client_name + '* at ' + $json.limit_after + ' drafts an hour (no change).' : ':white_check_mark: <@' + $('Read click').first().json.user_id + '> changed *' + $json.client_name + '* from ' + $json.limit_before + ' to ' + $json.limit_after + ' drafts an hour. It applies to the next message.' }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        240,
+        624
+      ],
+      "id": "ebd02445-1502-4bd8-be0b-598c6970a5ea",
+      "name": "Limit changed",
+      "webhookId": "a6df2dc7-1f96-4c87-9ca5-ee6d6a29411c",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- May this Slack user use the buttons? Active members of the staff list only (migration 017). Always one row.\nselect is_staff($1) as is_staff;",
+        "options": {
+          "queryReplacement": "={{ [ $('Parse click').first().json.user?.id ?? '' ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -880,
+        48
+      ],
+      "id": "e892b92e-68b0-4752-b841-8c2bc1bfe6d6",
+      "name": "Check staff",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "bccb13eb-8b29-4e4c-80b8-b332da4b9e81",
+              "leftValue": "={{ $json.client_active === true }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1136,
+        96
+      ],
+      "id": "bf524b8e-21e8-4c2b-b3a7-83655a057b7c",
+      "name": "Client active?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "text": ":information_source: Sent to the client, but not saved as a past ticket for the agent to learn from: the client is paused or removed in the admin app, and saving would send the reply to OpenAI.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "thread_ts": {
+            "replyValues": {
+              "thread_ts": "={{ $('Decide').first().json.queue_ts }}"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1584,
+        288
+      ],
+      "id": "635f8689-9190-4103-b92e-838ecbb3f1d1",
+      "name": "Note: past ticket not saved (paused)",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Is the client still active, right before the reply goes to OpenAI for the search index? Read again here, not\n-- taken from the click: a pause made while the reply was on its way to Slack must still stop it (a privacy hold\n-- must not reach OpenAI). Always one row; a client no longer in the list counts as not active.\n-- Values in order: 1 the ticket's channel\nselect coalesce((select c.status = 'active' from client_map c where c.channel_id = $1), false) as client_active;",
+        "options": {
+          "queryReplacement": "={{ [ $('Decide').first().json.channel_id ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        912,
+        96
+      ],
+      "id": "d2bda98f-83ae-49e5-8e0c-b8f79454f53c",
+      "name": "Client status now",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Slack click": {
+      "main": [
+        [
+          {
+            "node": "Read body",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read body": {
+      "main": [
+        [
+          {
+            "node": "Check signature",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check signature": {
+      "main": [
+        [
+          {
+            "node": "Genuine?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Can't check",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Genuine?": {
+      "main": [
+        [
+          {
+            "node": "Answer Slack",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Refuse",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Answer Slack": {
+      "main": [
+        [
+          {
+            "node": "Parse click",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse click": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can't check": {
+      "main": [
+        [
+          {
+            "node": "Alert: can't check clicks",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Check staff",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read click": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Load reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Decide",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Not on the team",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Load limit",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Set limit",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load reply": {
+      "main": [
+        [
+          {
+            "node": "Can still send?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Can still send?": {
+      "main": [
+        [
+          {
+            "node": "Edit box",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already handled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Edit box": {
+      "main": [
+        [
+          {
+            "node": "Open edit box",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open edit box": {
+      "main": [
+        [
+          {
+            "node": "Check Slack's answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decide": {
+      "main": [
+        [
+          {
+            "node": "Decided?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Decided?": {
+      "main": [
+        [
+          {
+            "node": "Send it?",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Already handled",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send it?": {
+      "main": [
+        [
+          {
+            "node": "Send reply",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Get card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Send reply": {
+      "main": [
+        [
+          {
+            "node": "Get card",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Past ticket text",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reopen draft",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reopen draft": {
+      "main": [
+        [
+          {
+            "node": "Note: not sent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Get card": {
+      "main": [
+        [
+          {
+            "node": "Done card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Done card": {
+      "main": [
+        [
+          {
+            "node": "Update card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Past ticket text": {
+      "main": [
+        [
+          {
+            "node": "Client status now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed": {
+      "main": [
+        [
+          {
+            "node": "Save past ticket",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save past ticket": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Note: past ticket not saved",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Load limit": {
+      "main": [
+        [
+          {
+            "node": "Limit box",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Limit box": {
+      "main": [
+        [
+          {
+            "node": "Open limit box",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Open limit box": {
+      "main": [
+        [
+          {
+            "node": "Check Slack's answer",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Set limit": {
+      "main": [
+        [
+          {
+            "node": "Limit changed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check staff": {
+      "main": [
+        [
+          {
+            "node": "Read click",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client active?": {
+      "main": [
+        [
+          {
+            "node": "Embed",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Note: past ticket not saved (paused)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client status now": {
+      "main": [
+        [
+          {
+            "node": "Client active?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "tags": []
+}

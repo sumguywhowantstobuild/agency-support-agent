@@ -1,0 +1,199 @@
+{
+  "name": "Backup check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 9
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "cc754b15-1a4a-434a-b0ee-2e1acd540f83",
+      "name": "Every morning at 9"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "id": "f7516b5d-9558-44c8-a346-4488273cbcf4",
+      "name": "Run now (test)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "4b511a8a-e46b-4a4c-89a1-e28f4d1b9c92",
+              "name": "alerts_channel",
+              "value": "PASTE_ALERTS_CHANNEL_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        224,
+        0
+      ],
+      "id": "e518964d-a443-4d28-b1bf-a0dc66ce9300",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Morning backup check: the newest try, and the newest good backup. Always one row.\nselect\n  (select max(finished_at) from backup_runs where ok) as last_good,\n  newest.ok as newest_ok,\n  newest.error as newest_error,\n  newest.started_at as newest_at,\n  now() as checked_at\nfrom (select 1) as one\nleft join lateral (\n  select ok, error, started_at from backup_runs order by started_at desc, id desc limit 1\n) as newest on true;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        448,
+        0
+      ],
+      "id": "3611bc13-81fe-4f95-ad4c-13433eeb93be",
+      "name": "Read backup runs",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Alert when the newest backup try failed, or when there has been no good backup for 26 hours (the job may not be\n// running at all: container stopped, PC off for days). All well: no output, so nothing is posted.\nconst row = $('Read backup runs').first().json;\nconst now = new Date(row.checked_at);\nconst lastGood = row.last_good ? new Date(row.last_good) : null;\nconst hoursSince = lastGood ? Math.floor((now - lastGood) / 3_600_000) : null;\n\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst short = (t, max) => {\n  const s = String(t ?? '').replace(/\\s+/g, ' ').trim();\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n};\nconst when = (d) => d.toLocaleString('en-US', { timeZone: 'America/New_York', dateStyle: 'medium', timeStyle: 'short' });\n\nlet problem = null;\nif (row.newest_ok === false) {\n  problem = `The last backup try failed (${when(new Date(row.newest_at))} New York):\\n\\`${esc(short(row.newest_error, 300)).replace(/`/g, \"'\")}\\``;\n} else if (hoursSince === null) {\n  problem = 'There has never been a good backup.';\n} else if (hoursSince >= 26) {\n  problem = `No good backup for ${hoursSince} hours. Is the backup service running (and the PC on)?`;\n}\nif (!problem) return [];\n\nconst last = lastGood ? `Last good backup: ${when(lastGood)} New York (${hoursSince} h ago).` : 'No good backup on record.';\nreturn [{ json: { text: `:floppy_disk: *Backup problem*\\n${problem}\\n${last}\\nOn the PC: \\`docker compose -f compose.dev.yaml logs backup --tail 20\\`` } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        672,
+        0
+      ],
+      "id": "290c67a6-1619-45e2-8bdf-b3e04a05b3e7",
+      "name": "Anything wrong?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.alerts_channel }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        896,
+        0
+      ],
+      "id": "d6429c86-5cc4-4e67-aad6-f663604a627a",
+      "name": "Post alert",
+      "webhookId": "dbed52e2-2470-4d0f-a3dd-d1b359065a91",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Every morning at 9: posts to #support-alerts if the newest backup try failed, or if there has been no good backup for 26 hours. All well: posts nothing."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        1120,
+        -32
+      ],
+      "id": "a3562f08-0773-45a6-884e-0c0d0481243e",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Every morning at 9": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Read backup runs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read backup runs": {
+      "main": [
+        [
+          {
+            "node": "Anything wrong?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Anything wrong?": {
+      "main": [
+        [
+          {
+            "node": "Post alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (test)": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "tags": []
+}

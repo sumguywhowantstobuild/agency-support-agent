@@ -1,0 +1,168 @@
+# The server version of the system: the same parts as compose.dev.yaml, with no open ports at all. Slack
+# reaches n8n through the Cloudflare tunnel (outbound only). The n8n editor has no public address: on a server it is
+# opened over SSH.
+# Run from the repository folder:  docker compose -p support-agent -f deploy/compose.yaml --env-file .env up -d
+# deploy/compose.copy.yaml turns it into a separate test copy on a PC (deploy/restore.sh copy).
+name: support-agent
+
+services:
+  postgres:
+    image: pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0 # tag and digest: upgrade on purpose (SETUP section 12)
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    environment:
+      POSTGRES_DB: knowledge
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d knowledge"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  n8n:
+    image: n8nio/n8n:2.43.6@sha256:dd580fe1ab6e99e85bc66f2acf8bc8c5e9409fbe61b2e2803c5024403ef52833 # upgrade on purpose
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # n8n's own records (workflows, logins, run history) go in their own database, never SQLite.
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: n8n
+      DB_POSTGRESDB_USER: n8n
+      DB_POSTGRESDB_PASSWORD: ${N8N_DB_PASSWORD:?Set N8N_DB_PASSWORD in .env}
+      N8N_ENCRYPTION_KEY: ${N8N_ENCRYPTION_KEY:?Set N8N_ENCRYPTION_KEY in .env}
+      N8N_EDITOR_BASE_URL: ${N8N_EDITOR_BASE_URL:-http://localhost:5678/}
+      N8N_WEBHOOK_URL: ${N8N_WEBHOOK_URL:?Set N8N_WEBHOOK_URL in .env} # the tunnel's address, so n8n shows Slack the right URL
+      N8N_PROXY_HOPS: 1 # requests arrive through one proxy (the tunnel), so n8n reads the real sender address
+      GENERIC_TIMEZONE: America/New_York
+      TZ: America/New_York
+      N8N_DIAGNOSTICS_ENABLED: "false"
+      N8N_COMMUNITY_PACKAGES_ENABLED: "false"
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: "true"
+      N8N_PUBLIC_API_DISABLED: "true" # remote-control interface off: the deploy scripts use n8n's command line
+      # Run history: finished runs are deleted after 7 days.
+      EXECUTIONS_DATA_PRUNE: "true"
+      EXECUTIONS_DATA_MAX_AGE: 168
+    volumes:
+      - n8ndata:/home/node/.n8n
+
+  agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Only what the agent needs, not the whole .env (which also holds the database admin and n8n secrets).
+      # Optional settings (TOOL_CALL_CAP etc.) use their defaults; add them here when you change one.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:?Set OPENAI_API_KEY in .env}
+      OPENAI_MODEL: ${OPENAI_MODEL:?Set OPENAI_MODEL in .env}
+      JUDGE_MODEL: ${JUDGE_MODEL:-} # accuracy test only; blank is fine for the live agent, the test runner refuses it
+      AGENT_API_KEY: ${AGENT_API_KEY:?Set AGENT_API_KEY in .env}
+      GHL_KEY_PRIVATE: ${GHL_KEY_PRIVATE:?Set GHL_KEY_PRIVATE in .env} # opens the locked client keys; only the agent has it
+      # Inside Docker the database is "postgres" on port 5432 (DATABASE_URL in .env is for running on the host).
+      DATABASE_URL: postgresql://agent_reader:${AGENT_DB_PASSWORD:?Set AGENT_DB_PASSWORD in .env}@postgres:5432/knowledge
+    stop_grace_period: 90s # drafts in progress (up to 75 s) finish before the agent stops
+    # Hardening: files can't be changed, no special system powers, no gaining new ones.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # The admin app (Clients and Staff screens): the agent's image, its own container and settings. Reached only through
+  # the tunnel behind Cloudflare Access (SETUP section 14), which signs the pass the app checks on every request.
+  admin:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    command: ["uvicorn", "support_agent.admin.app:app", "--host", "0.0.0.0", "--port", "8000", "--no-server-header"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+      agent:
+        condition: service_started # Test connection asks the agent; the rest of the app works without it
+    environment:
+      # Only the admin app's settings: no OpenAI key, no database admin password, and only the public half of the key
+      # pair, so it can lock a client key but never open one.
+      ADMIN_DATABASE_URL: postgresql://admin_app:${ADMIN_DB_PASSWORD:?Set ADMIN_DB_PASSWORD in .env}@postgres:5432/knowledge
+      GHL_KEY_PUBLIC: ${GHL_KEY_PUBLIC:?Set GHL_KEY_PUBLIC in .env}
+      CF_TEAM_DOMAIN: ${CF_TEAM_DOMAIN:?Set CF_TEAM_DOMAIN in .env}
+      CF_AUDIENCE: ${CF_AUDIENCE:?Set CF_AUDIENCE in .env}
+      CF_CERTS_URL: https://${CF_TEAM_DOMAIN}/cdn-cgi/access/certs
+      ADMIN_ORIGIN: ${ADMIN_ORIGIN:?Set ADMIN_ORIGIN in .env}
+      TIME_ZONE: ${TIME_ZONE:-America/New_York} # the agency's zone: the chart's midnight and every time shown (SETUP section 14)
+      AGENT_URL: http://agent:8000
+      AGENT_API_KEY: ${AGENT_API_KEY:?Set AGENT_API_KEY in .env}
+      SLACK_BOT_TOKEN: ${SLACK_BOT_TOKEN:?Set SLACK_BOT_TOKEN in .env}
+    # Hardening: files can't be changed, no special system powers, no gaining new ones.
+    read_only: true
+    tmpfs:
+      - /tmp
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Nightly encrypted backups to Cloudflare R2. Checks every hour; backup.py decides when one is due.
+  backup:
+    build:
+      context: ..
+      dockerfile: Dockerfile.backup
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    init: true # a small init passes Docker's stop signal on, so the job stops at once instead of after 10 s
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Only what the backup needs. The private key that opens the backups is never here (password manager only).
+      PGHOST: postgres
+      PGUSER: backup
+      PGPASSWORD: ${BACKUP_DB_PASSWORD:?Set BACKUP_DB_PASSWORD in .env}
+      R2_ENDPOINT: ${R2_ENDPOINT:?Set R2_ENDPOINT in .env}
+      R2_BUCKET: ${R2_BUCKET:?Set R2_BUCKET in .env}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:?Set R2_ACCESS_KEY_ID in .env}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:?Set R2_SECRET_ACCESS_KEY in .env}
+      BACKUP_AGE_RECIPIENT: ${BACKUP_AGE_RECIPIENT:?Set BACKUP_AGE_RECIPIENT in .env}
+    # Hardening: files can't be changed (dumps go to a temporary in-memory folder), no special powers.
+    read_only: true
+    tmpfs:
+      - /tmp:size=1100m # room for the 500 MB cap twice over while files are encrypted
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+  # Lets Slack reach n8n's webhooks through Cloudflare (outbound only, no open ports on the machine).
+  # The routes (n8n.<domain> -> http://n8n:5678, webhook paths only; admin.<domain> -> http://admin:8000) live in the
+  # Cloudflare dashboard; see SETUP.md sections 7 and 14.
+  tunnel:
+    image: cloudflare/cloudflared:2026.10.5@sha256:1b1d34d0a9c0bfca9de72db8460d328db3f19edd2b96169114e3e893a97bbe53 # upgrade on purpose
+    restart: unless-stopped # comes back by itself after a crash, a Docker restart or a PC restart
+    command: tunnel --no-autoupdate run
+    depends_on:
+      - n8n
+      - admin
+    environment:
+      TUNNEL_TOKEN: ${CLOUDFLARE_TUNNEL_TOKEN:?Set CLOUDFLARE_TUNNEL_TOKEN in .env}
+      # IPv4 only: Docker's network has no IPv6, and on "auto" the tunnel can pick IPv6 after a restart and stay down.
+      TUNNEL_EDGE_IP_VERSION: "4"
+    # Hardening: files can't be changed, no special system powers, no gaining new ones.
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  pgdata:
+  n8ndata:

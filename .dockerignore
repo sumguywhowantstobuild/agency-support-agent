@@ -1,0 +1,6 @@
+# Only these go into the build: never .env, .venv, .git, research/ or anything else.
+*
+!pyproject.toml
+!uv.lock
+!src/
+**/__pycache__

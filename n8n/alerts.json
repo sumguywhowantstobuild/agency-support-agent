@@ -1,0 +1,124 @@
+{
+  "name": "Alerts",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.errorTrigger",
+      "typeVersion": 1,
+      "position": [
+        16,
+        -128
+      ],
+      "id": "af31e89b-c7c5-42b1-8210-e0b8bce66e5d",
+      "name": "A workflow failed"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "7d0b6a52-3e1f-4b8c-a9d4-1c2e5f6a7b80",
+              "name": "alerts_channel",
+              "value": "PASTE_ALERTS_CHANNEL_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        240,
+        -128
+      ],
+      "id": "62abc896-e1b9-482d-ad05-399f680c8373",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// What broke, where, and a link to the failed run. Never the run's data: a client's message can sit in a step's\n// output, so only the workflow name, the step and a shortened error message are shown.\nconst e = $('A workflow failed').first().json;\nconst run = e.execution; // missing when the workflow failed before it started (its trigger broke)\nconst error = run?.error ?? e.trigger?.error ?? {};\n\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst short = (t, max) => {\n  const s = String(t ?? '').replace(/\\s+/g, ' ').trim();\n  return s.length > max ? s.slice(0, max - 1) + '…' : s;\n};\n\nconst workflow = esc(e.workflow?.name ?? 'A workflow');\nconst where = run?.lastNodeExecuted\n  ? ` at step *${esc(run.lastNodeExecuted)}*`\n  : e.trigger ? ' before it could start (its trigger failed)' : '';\nconst message = esc(short(error.message || error.description || 'No error message', 300)).replace(/`/g, \"'\");\n// Only a plain http(s) address becomes a link; anything else is left out.\nconst link = /^https?:\\/\\/[^\\s<>|]+$/.test(run?.url ?? '') ? `\\n<${run.url}|Open the failed run>` : '';\n\nreturn [{ json: { text: `:rotating_light: *${workflow}* failed${where}\\n\\`${message}\\`${link}` } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        464,
+        -128
+      ],
+      "id": "9f3af870-84a1-43c7-9efb-5c7ae13a5cae",
+      "name": "Build alert"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.alerts_channel }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        688,
+        -128
+      ],
+      "id": "2fc23f6e-deb5-4d89-ad23-b7aded53de44",
+      "name": "Post alert",
+      "webhookId": "23fe657a-5d45-4a1a-8ea1-8120ea94ea4b",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "A workflow failed": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert": {
+      "main": [
+        [
+          {
+            "node": "Post alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "meta": {},
+  "tags": []
+}

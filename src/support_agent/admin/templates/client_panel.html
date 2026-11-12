@@ -1,0 +1,171 @@
+{# One client's panel: the <dialog> alone. clients.html includes it over the list; panel_alone.html carries it
+   by itself for a refused form. The title is an h2 and the section labels h3s, under the page's h1 (Clients). #}
+{% set tone, icon, label = states[state] %}
+    <dialog class="ds-sheet" id="panel" open aria-labelledby="sheet-title" data-state="{{ state }}">
+      <div class="ds-sheet__grabber" aria-hidden="true"></div>
+      <div class="ds-sheet__head">
+        <div class="ds-sheet__heading">
+          <h2 class="ds-sheet__title" id="sheet-title" tabindex="-1">{{ client.display_name }}</h2>
+          <span class="ds-sheet__sub">{{ client.channel_label }}</span>
+          <span class="ds-status ds-status--{{ tone }}"><svg aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="ds-status__label">{{ label }}</span></span>
+        </div>
+        <a class="ds-button ds-button--icon ds-button--tonal" href="/clients" aria-label="Close panel"><svg aria-hidden="true"><use href="#i-x"/></svg></a>
+      </div>
+      <div class="ds-sheet__body">
+        <section class="ds-sheet__section" aria-labelledby="sheet-hour">
+          <div class="ds-sheet__label"><h3 id="sheet-hour">This hour</h3></div>
+          <div class="ds-card ds-card--group">
+          {% if state == "paused" %}
+            <div class="ds-card__use"><div class="ds-card__use-top"><span class="ds-card__use-number">–</span><span class="ds-card__use-of">No drafts while paused</span></div></div>
+          {% else %}
+            <div class="ds-card__use{% if state == 'at_limit' %} ds-card__use--warn{% endif %}">
+              <div class="ds-card__use-top"><span class="ds-card__use-number">{{ client.used_this_hour }}</span><span class="ds-card__use-of">of {{ client.drafts_per_hour }} drafts this hour</span></div>
+              <span class="ds-card__meter{% if state == 'at_limit' %} ds-card__meter--warn{% endif %}" aria-hidden="true"><span class="ds-card__fill" data-level="{{ level }}"></span></span>
+            </div>
+          {% endif %}
+            <div class="ds-card__row ds-card__row--control">
+              <span class="ds-card__row-text"><span class="ds-card__row-title" id="sheet-limit-label">Draft limit</span><span class="ds-card__row-hint" id="sheet-limit-hint">1 to 200. Applies from the next message, same as the Slack button. Logged with your name.</span></span>
+              <div class="ds-inline-edit"><input class="ds-inline-edit__input" id="sheet-limit" inputmode="numeric" autocomplete="off" value="{{ client.drafts_per_hour }}" data-client="{{ client.client_key }}" data-name="{{ client.display_name }}" aria-labelledby="sheet-limit-label" aria-describedby="sheet-limit-unit"><span class="ds-inline-edit__unit" id="sheet-limit-unit">an hour</span></div>
+            </div>
+          </div>
+        </section>
+        {# No heading over this row or the Remove one: each repeats the title of its own row. #}
+        <section class="ds-sheet__section" aria-label="Drafting">
+          <div class="ds-card ds-card--group">
+          {% if client.status == "paused" %}
+            <form class="ds-card__row ds-card__row--control" method="post" action="/clients/{{ client.client_key }}/resume">
+              <span class="ds-card__row-text"><span class="ds-card__row-title" id="run-title">Drafting</span><span class="ds-card__row-hint" id="run-hint">Paused: {{ reasons.get(client.pause_reason, "") }}{% if client.pause_note %}. <!--email_off-->{{ client.pause_note }}<!--/email_off-->{% endif %}. Messages get a “paused” alert.</span></span>
+              <input class="ds-checkbox-toggle ds-checkbox-toggle--switch" id="run" type="checkbox" role="switch" switch aria-labelledby="run-title" aria-describedby="run-hint" data-submit-on-change>
+              {# For no script: the switch submits by itself only with it. admin.js hides this button, as the Sort button. #}
+              <button type="submit" class="ds-button" data-no-script>Resume drafting</button>
+            </form>
+          {% else %}
+            <label class="ds-card__row ds-card__row--control">
+              <span class="ds-card__row-text"><span class="ds-card__row-title" id="run-title">Drafting</span><span class="ds-card__row-hint" id="run-hint">The agent drafts replies for this client.</span></span>
+              <input class="ds-checkbox-toggle ds-checkbox-toggle--switch" id="run" type="checkbox" role="switch" switch{% if not pausing %} checked{% endif %} aria-labelledby="run-title" aria-describedby="run-hint" aria-controls="pause-confirm"{% if pausing %} aria-expanded="true"{% else %} aria-expanded="false"{% endif %}>
+            </label>
+            {# For no script: a link that shows the question. admin.js hides the whole row. #}
+            {% if not pausing %}<div class="ds-card__row" data-no-script><a class="ds-button" href="/clients/{{ client.client_key }}?confirm=pause">Pause this client</a></div>{% endif %}
+            {# Shown by admin.js when the switch is turned off; without the script, ?confirm=pause shows it. #}
+            <form class="ds-card__row ds-card__row--confirm" id="pause-confirm" method="post" action="/clients/{{ client.client_key }}/pause" novalidate{% if not pausing %} hidden{% endif %}>
+              <p class="ds-card__row-note">Pause {{ client.display_name }}? Its messages get a “paused” alert in Slack and no AI draft until you resume.</p>
+              <div class="ds-form-field">
+                <label class="ds-form-field__label" for="pause-reason">Reason</label>
+                <span class="ds-select">
+                  <select class="ds-select__control" id="pause-reason" name="reason"{% if errors.reason %} aria-invalid="true"{% endif %} aria-describedby="pause-reason-error"><button><selectedcontent></selectedcontent></button>
+                    <option value=""{% if not form.reason %} selected{% endif %}>Choose a reason</option>
+                    {% for value, words in reasons.items() %}
+                    <option value="{{ value }}"{% if form.reason == value %} selected{% endif %}>{{ words }}</option>
+                    {% endfor %}
+                  </select>
+                </span>
+                <span class="ds-form-field__error" id="pause-reason-error">{{ errors.reason }}</span>
+              </div>
+              <div class="ds-form-field">
+                <label class="ds-form-field__label" for="pause-note">Note (optional)</label>
+                <textarea class="ds-text-input" id="pause-note" name="note" rows="2"{% if errors.note %} aria-invalid="true"{% endif %} aria-describedby="pause-note-help pause-note-error">{{ form.note }}</textarea>
+                <span class="ds-form-field__help" id="pause-note-help">Up to {{ note_limit }} characters. Shown to staff only.</span>
+                <span class="ds-form-field__error" id="pause-note-error">{{ errors.note }}</span>
+              </div>
+              <div class="ds-card__buttons"><button type="submit" class="ds-button ds-button--danger">Pause client</button><a class="ds-button" href="/clients/{{ client.client_key }}" data-keep-drafting>Keep drafting</a></div>
+            </form>
+          {% endif %}
+          </div>
+        </section>
+        {# No heading over this row either: its title is the label. Change channel is a link that shows the question and
+           Move a plain form post, so both work without the script (migration 024). #}
+        <section class="ds-sheet__section" aria-label="Slack channel">
+          <div class="ds-card ds-card--group">
+          {% if changing %}
+            <form class="ds-card__row ds-card__row--confirm" id="channel-confirm" method="post" action="/clients/{{ client.client_key }}/channel" novalidate>
+              <p class="ds-card__row-note">Move {{ client.display_name }} from {{ client.channel_label }} to another Slack channel? Its past tickets and changes stay with it. A message in the old channel then gets the unknown-channel alert.</p>
+              <div class="ds-form-field">
+                <label class="ds-form-field__label" for="move-channel">New channel</label>
+                <span class="ds-select">
+                  {# The first option is blank and always the one picked: a channel is chosen on purpose, never by default. #}
+                  <select class="ds-select__control" id="move-channel" name="channel_id"{% if errors.channel_id %} aria-invalid="true"{% endif %} aria-describedby="move-channel-help move-channel-error"><button><selectedcontent></selectedcontent></button>
+                    <option value="" selected>Choose a channel</option>
+                    {% for channel in move_channels or [] %}
+                    <option value="{{ channel.id }}">#{{ channel.name }}</option>
+                    {% endfor %}
+                  </select>
+                </span>
+                {% if move_channels is none %}
+                <span class="ds-form-field__help" id="move-channel-help">Can't load the support bot's Slack channels right now. Reload in a minute.</span>
+                {% elif not move_channels %}
+                <span class="ds-form-field__help" id="move-channel-help">The support bot isn't in a channel this client can move to. Add it to the new channel in Slack, then reload.</span>
+                {% else %}
+                <span class="ds-form-field__help" id="move-channel-help">Channels the support bot is in that no client uses, and none that another client had.</span>
+                {% endif %}
+                <span class="ds-form-field__error" id="move-channel-error">{{ errors.channel_id }}</span>
+              </div>
+              {% if channel_error %}
+              <div class="ds-alert ds-alert--fail" role="alert"><svg aria-hidden="true"><use href="#i-x"/></svg><div class="ds-alert__body">{{ channel_error }}</div></div>
+              {% endif %}
+              <div class="ds-card__buttons">{% if move_channels %}<button type="submit" class="ds-button ds-button--accent">Move client</button>{% endif %}<a class="ds-button" href="/clients/{{ client.client_key }}">Cancel</a></div>
+            </form>
+          {% else %}
+            <div class="ds-card__row"><span class="ds-card__row-text"><span class="ds-card__row-title">Slack channel</span><span class="ds-card__row-hint">{{ client.channel_label }}</span></span><a class="ds-button" href="/clients/{{ client.client_key }}?confirm=channel">Change channel</a></div>
+          {% endif %}
+          </div>
+        </section>
+        <section class="ds-sheet__section" aria-labelledby="sheet-highlevel">
+          <div class="ds-sheet__label"><h3 id="sheet-highlevel">HighLevel connection</h3></div>
+          <div class="ds-card ds-card--group">
+            <div class="ds-card__row"><span class="ds-card__row-text">Location ID</span><span class="ds-card__row-value ds-card__row-value--mono">{{ client.location_id }}</span></div>
+            <div class="ds-card__row"><span class="ds-card__row-text">Token</span><span class="ds-card__row-value">Stored encrypted, never shown</span></div>
+          {% if replacing %}
+            {# The same field and Test button as Add client; never given a value, so the key never comes back in a page. #}
+            <form class="ds-card__row ds-card__row--confirm" method="post" action="/clients/{{ client.client_key }}/key" novalidate>
+              <input type="hidden" name="location_id" value="{{ client.location_id }}">
+              <div class="ds-form-field">
+                <label class="ds-form-field__label" for="add-key">New HighLevel token</label>
+                <div class="ds-text-input__group">
+                  <input class="ds-text-input ds-text-input--secret" id="add-key" name="key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-1p-ignore data-lpignore="true" data-bwignore{% if errors.key %} aria-invalid="true"{% endif %} aria-describedby="add-key-help add-key-error">
+                  <button type="button" class="ds-button" id="add-test" hidden>Test</button>
+                </div>
+                <span class="ds-form-field__help" id="add-key-help">For this client's own HighLevel account. Tested before it replaces the old token.</span>
+                <span class="ds-form-field__error" id="add-key-error">{{ errors.key }}</span>
+              </div>
+              <div id="add-test-result" role="status"></div>
+              <div class="ds-card__buttons"><button type="submit" class="ds-button ds-button--accent">Replace token</button><a class="ds-button" href="/clients/{{ client.client_key }}">Cancel</a></div>
+            </form>
+          {% else %}
+            <div class="ds-card__row"><a class="ds-button" href="/clients/{{ client.client_key }}?confirm=key">Replace token</a></div>
+          {% endif %}
+          </div>
+        </section>
+        <section class="ds-sheet__section" aria-labelledby="sheet-changes">
+          <div class="ds-sheet__label"><h3 id="sheet-changes">Changes to this client</h3></div>
+          <div class="ds-card ds-card--recent">
+          {% if history %}
+            <ol class="ds-card__history">
+            {% for change, said, (stamp, when) in history %}
+              <li class="ds-card__history-item"><b>{{ change.staff_name }}</b> <!--email_off-->{{ said }}<!--/email_off--><time datetime="{{ stamp }}">{{ when }}</time></li>
+            {% endfor %}
+            </ol>
+          {% else %}
+            <p>No changes since it was added.</p>
+          {% endif %}
+          </div>
+        </section>
+        <section class="ds-sheet__section" aria-label="Remove client">
+          <div class="ds-card ds-card--group">
+          {% if removing %}
+            <form class="ds-card__row ds-card__row--confirm" method="post" action="/clients/{{ client.client_key }}/remove" novalidate>
+              <p class="ds-card__row-note">Removing {{ client.display_name }} deletes their HighLevel token and stops reading their channel. Their past tickets stay under the 12-month rule. Remove the support bot from the channel in Slack yourself.</p>
+              <div class="ds-form-field">
+                <label class="ds-form-field__label" for="remove-confirm">Type the client's name to confirm</label>
+                <input class="ds-text-input" id="remove-confirm" name="confirm" autocomplete="off" spellcheck="false"{% if errors.confirm %} aria-invalid="true"{% endif %} aria-describedby="remove-confirm-help remove-confirm-error">
+                <span class="ds-form-field__help" id="remove-confirm-help">{{ client.display_name }}</span>
+                <span class="ds-form-field__error" id="remove-confirm-error">{{ errors.confirm }}</span>
+              </div>
+              <div class="ds-card__buttons"><button type="submit" class="ds-button ds-button--danger">Remove client</button><a class="ds-button" href="/clients/{{ client.client_key }}">Keep client</a></div>
+            </form>
+          {% else %}
+            <div class="ds-card__row"><span class="ds-card__row-text"><span class="ds-card__row-title">Remove client</span><span class="ds-card__row-hint">Deletes the token and stops drafting. Past tickets stay.</span></span><a class="ds-button ds-button--danger" href="/clients/{{ client.client_key }}?confirm=remove">Remove…</a></div>
+          {% endif %}
+          </div>
+        </section>
+      </div>
+    </dialog>

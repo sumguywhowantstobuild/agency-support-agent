@@ -1,0 +1,169 @@
+{% extends "base.html" %}
+{% block title %}{{ page_title or "Clients" }} · Bluejay support admin{% endblock %}
+{# The short line that shows which chart line is a client's, before its name; none for a client with no draft today. #}
+{% macro line_key(row) %}{% set series = chart.series_of.get(row.client_key) %}{% if series %}<svg class="ds-chart__key" viewBox="0 0 18 2" aria-hidden="true"><path class="ds-chart__line ds-chart__line--{{ series }}" d="M0 1H18"/></svg>{% endif %}{% endmacro %}
+{# A client's status in words: a paused one says why. #}
+{% macro status_words(row, state, label) %}{{ label }}{% if state == "paused" and row.pause_reason in reasons %}: {{ reasons[row.pause_reason] }}{% endif %}{% endmacro %}
+{% block content %}
+<header class="ds-page-header">
+  <div class="ds-page-header ds-page-header--section">
+    <h1 class="ds-page-header__title" tabindex="-1">Clients</h1>
+    <span class="ds-page-header__spacer"></span>
+    {# With no client yet, the empty state's button is the one first step. #}
+    {% if any_clients %}<a class="ds-button ds-button--accent ds-page-header__add" href="/clients/new"><svg aria-hidden="true"><use href="#i-plus"/></svg>Add client</a>{% endif %}
+    {% include "theme_button.html" %}
+  </div>
+</header>
+{% if any_clients %}
+{# Needs you and the main panel, a region of their own: search and sort never change it; every saved limit refreshes it
+   (admin.js). #}
+<div class="ds-page__summary" id="summary">
+  <section class="ds-card ds-card--needs" aria-labelledby="needs-title">
+  {% if needs %}
+    <h2 class="ds-card__label ds-card__label--warn" id="needs-title" tabindex="-1"><svg aria-hidden="true"><use href="#i-warn"/></svg>Needs you<span class="ds-card__aside">{{ needs | length }} item{{ "s" if needs | length != 1 }}</span></h2>
+    <ul class="ds-card__list" id="needs-list">
+    {% for row, state in needs %}
+      {% set title = row.display_name ~ (" is at its limit" if state == "at_limit" else " is paused") %}
+      {# Only the limit is amber (edge and words); a paused item keeps the normal edge and plain words. #}
+      <li class="ds-card__item{% if state == 'at_limit' %} ds-card__item--warn{% endif %}" data-client="{{ row.client_key }}" data-needs="{{ row.client_key }}:{{ state }}">
+        <div class="ds-card__text"><span class="ds-card__title">{{ title }}</span>
+        {% if state == "at_limit" %}
+          <span class="ds-card__sub">{{ row.used_this_hour }} of {{ row.drafts_per_hour }} drafts this hour. New messages wait for the next hour.</span></div>
+        {% else %}
+          <span class="ds-card__sub">{{ reasons.get(row.pause_reason, "Paused") }}. New messages get a “Paused: answer by hand” card in Slack.</span></div>
+        {% endif %}
+        <div class="ds-card__actions">
+          {# Both open the client's panel (a page without the script); data-focus names the control admin.js focuses in it. #}
+          {% if state == "at_limit" %}<a class="ds-button" href="/clients/{{ row.client_key }}" data-focus="limit" aria-label="Raise limit: {{ row.display_name }}">Raise limit</a>
+          {% else %}<a class="ds-button ds-button--plain" href="/clients/{{ row.client_key }}" data-focus="run" aria-label="Review: {{ row.display_name }}">Review</a>{% endif %}
+          <button type="button" class="ds-button ds-button--icon" aria-label="Dismiss: {{ title }}" data-dismiss hidden><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+        </div>
+      </li>
+    {% endfor %}
+      <li class="ds-card__item ds-card__item--calm" data-needs-seen hidden><div class="ds-card__text"><span class="ds-card__title">You’ve seen everything</span><span class="ds-card__sub">Hidden messages come back when the page is reloaded.</span></div></li>
+    </ul>
+    <button type="button" class="ds-button ds-button--plain ds-card__more" aria-expanded="false" aria-controls="needs-list" data-needs-more hidden>Show all {{ needs | length }}</button>
+  {% else %}
+    <h2 class="ds-card__label ds-card__label--ok" id="needs-title"><svg aria-hidden="true"><use href="#i-check"/></svg>Needs you</h2>
+    <ul class="ds-card__list">
+      <li class="ds-card__item ds-card__item--calm"><div class="ds-card__text"><span class="ds-card__title">Every client is drafting within its limit</span><span class="ds-card__sub">Nothing needs you right now.</span></div></li>
+    </ul>
+  {% endif %}
+  </section>
+  {# The main panel: this hour's number on the left, today's chart on the right. #}
+  <section class="ds-band" aria-label="Drafts">
+    <div class="ds-band__summary">
+      <span class="ds-band__title">Drafts this hour</span>
+      <p class="ds-card__number"><span id="total-used" data-ds-ticker="total-used">{{ totals.used }}</span> <span class="ds-card__unit">of <span id="total-limits" data-ds-ticker="total-limits">{{ totals.limits }}</span></span></p>
+      <span class="ds-card__meter" aria-hidden="true"><span class="ds-card__fill" id="total-bar" data-level="{{ totals.level }}"></span></span>
+      <p class="ds-band__fact"><span>Paused</span><b>{{ totals.paused }} client{{ "s" if totals.paused != 1 }}</b></p>
+    </div>
+    <div class="ds-band__chart">
+      <span class="ds-band__title">Drafts today</span>
+      {% include "chart.html" %}
+    </div>
+  </section>
+</div>
+{% endif %}
+{# The latest change, as one line. Always here, hidden when there is none, so the script can refresh it by its id. #}
+<div id="change-line"{% if not latest %} hidden{% endif %}>
+{%- if latest %}
+  <div class="ds-change-line"><span><b>{{ latest.who }}</b> <!--email_off-->{{ latest.said }}<!--/email_off--></span><time datetime="{{ latest.stamp }}">{{ latest.when }}</time><a class="ds-change-line__link" href="/history">All changes<svg aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+{%- endif %}
+</div>
+{# Search and sort submit the form "find" (Enter in the search field; without the script, the Sort button). The
+   view switch is its own form, so Enter in search never presses one of its buttons. With the script, a new sort and
+   the view switch update #results in place (admin.js), so picking a sort never changes the page (WCAG 2.2 3.2.2). #}
+<form id="find" method="get" action="/clients" hidden><input type="hidden" name="view" value="{{ view }}"></form>
+<section class="ds-page__section" aria-labelledby="all-clients">
+<div class="ds-page-header ds-page-header--section">
+  <h2 class="ds-page-header__heading" id="all-clients">All clients <span class="ds-page-header__count" id="clients-count">{{ clients | length }}</span></h2>
+  <span class="ds-page-header__spacer"></span>
+  <div class="ds-text-input__wrap ds-page-header__tool--full">
+    <svg class="ds-text-input__icon" aria-hidden="true"><use href="#i-search"/></svg>
+    <label class="ds-form-field__label ds-form-field__label--hidden" for="q">Search clients</label>
+    <input class="ds-text-input ds-text-input--search" id="q" name="q" type="search" form="find" autocomplete="off" placeholder="Search clients" value="{{ q }}">
+  </div>
+  <span class="ds-select ds-select--compact">
+    <label class="ds-form-field__label ds-form-field__label--hidden" for="sort">Sort</label>
+    <select class="ds-select__control" id="sort" name="sort" form="find"><button><selectedcontent></selectedcontent></button>
+      <option value="closest"{% if sort == "closest" %} selected{% endif %}>Closest to limit</option>
+      <option value="name"{% if sort == "name" %} selected{% endif %}>Name</option>
+    </select>
+  </span>
+  <button type="submit" class="ds-button" form="find" data-sort-button>Sort</button>
+  <form class="ds-segmented ds-segmented--hug" role="group" aria-label="View" method="get" action="/clients">
+    <input type="hidden" name="q" value="{{ q }}"><input type="hidden" name="sort" value="{{ sort }}">
+    <button type="submit" class="ds-segmented__item" name="view" value="cards" aria-pressed="{{ 'true' if view == 'cards' else 'false' }}"><svg aria-hidden="true"><use href="#i-cards"/></svg>Cards</button>
+    <button type="submit" class="ds-segmented__item" name="view" value="list" aria-pressed="{{ 'true' if view == 'list' else 'false' }}"><svg aria-hidden="true"><use href="#i-list"/></svg>List</button>
+  </form>
+</div>
+<div class="ds-page__results" id="results">
+{% if not any_clients %}
+<div class="ds-empty-state">
+  <span class="ds-empty-state__badge"><svg aria-hidden="true"><use href="#i-plus"/></svg></span>
+  <h2 class="ds-empty-state__title">No clients yet</h2>
+  <p class="ds-empty-state__text">A client is a Slack channel, a HighLevel account and a draft limit. Each one shows up here with this hour's drafts against its limit.</p>
+  <a class="ds-button ds-button--accent" href="/clients/new">Add client</a>
+</div>
+{% elif not clients %}
+<p class="ds-empty-state ds-empty-state--inline">No client matches. <a class="ds-button ds-button--plain" href="/clients?sort={{ sort }}&amp;view={{ view }}">Show all clients</a></p>
+{% elif view == "list" %}
+{# Each row is one target: the name is its real link, stretched over the row (a page without the script follows it).
+   The limit is on the card and in the panel, the HighLevel location in the panel. #}
+<div class="ds-card ds-card--flush">
+  <div class="ds-table__wrap">
+    <table class="ds-table ds-table--fixed ds-table--rows" role="table">
+      <caption class="ds-table__caption">All clients</caption>
+      <colgroup><col class="ds-table__col--w36"><col class="ds-table__col--w22"><col class="ds-table__col--w22"><col></colgroup>
+      <thead role="rowgroup"><tr role="row"><th role="columnheader" scope="col"{% if sort == "name" %} aria-sort="ascending"{% endif %}>Client</th><th role="columnheader" scope="col" class="ds-table__cell--number">This hour</th><th role="columnheader" scope="col">Status</th><th role="columnheader" scope="col" aria-label="Open"></th></tr></thead>
+      <tbody role="rowgroup">
+      {% for row, state, level in clients %}
+        {% set tone, icon, label = states[state] %}
+        {% set words = status_words(row, state, label) %}
+        <tr role="row" data-state="{{ state }}" data-ds-key="client-{{ row.client_key }}">
+          <td role="cell" class="ds-table__cell--primary"><a class="ds-table__name" id="row-{{ loop.index }}" href="/clients/{{ row.client_key }}">{{ line_key(row) }}{{ row.display_name }}</a><span class="ds-table__sub">{{ row.channel_label }}</span></td>
+          {% if state == "paused" %}
+          <td role="cell" class="ds-table__cell--number" data-label="This hour">–</td>
+          {% else %}
+          <td role="cell" class="ds-table__cell--number{% if state == 'at_limit' %} ds-table__cell--warn{% endif %}" data-label="This hour">{{ row.used_this_hour }}<span class="ds-card__meter ds-card__meter--mini{% if state == 'at_limit' %} ds-card__meter--warn{% endif %}" aria-hidden="true"><span class="ds-card__fill" data-level="{{ level }}"></span></span></td>
+          {% endif %}
+          <td role="cell" class="ds-table__cell--status"><span class="ds-table__status"><span class="ds-status ds-status--{{ tone }}"><svg aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="ds-status__label" title="{{ words }}">{{ words }}</span></span></span></td>
+          <td role="cell" class="ds-table__cell--go"><svg class="ds-table__go" aria-hidden="true"><use href="#i-chev"/></svg></td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% else %}
+<div class="ds-page__grid" data-ds-stagger>
+{% for row, state, level in clients %}
+  {% set tone, icon, label = states[state] %}
+  <article class="ds-card ds-card--tile{% if state == 'at_limit' %} ds-card--warn{% endif %}" data-state="{{ state }}" data-ds-key="client-{{ row.client_key }}">
+    <div class="ds-card__head"><span class="ds-status ds-status--plain ds-status--{{ tone }}"><svg aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="ds-status__label">{{ status_words(row, state, label) }}</span></span></div>
+    <h3 class="ds-card__name"><a class="ds-card__name-button" id="name-{{ loop.index }}" href="/clients/{{ row.client_key }}">{{ line_key(row) }}{{ row.display_name }}</a><span class="ds-card__sub">{{ row.channel_label }}</span></h3>
+    <div class="ds-card__usage">
+    {% if state == "paused" %}
+      <div class="ds-card__count"><span class="ds-card__count-number">–</span><span class="ds-card__count-note">no drafts while paused</span></div>
+    {% else %}
+      <div class="ds-card__count"><span class="ds-card__count-number">{{ row.used_this_hour }}</span><span class="ds-card__count-note">of {{ row.drafts_per_hour }} this hour</span></div>
+      <span class="ds-card__meter" aria-hidden="true"><span class="ds-card__fill" data-level="{{ level }}"></span></span>
+    {% endif %}
+    </div>
+    <div class="ds-card__foot"><div class="ds-inline-edit">
+      <label class="ds-inline-edit__label" id="limit-{{ loop.index }}-label" for="limit-{{ loop.index }}">Limit</label>
+      <input class="ds-inline-edit__input" id="limit-{{ loop.index }}" inputmode="numeric" autocomplete="off" value="{{ row.drafts_per_hour }}" data-client="{{ row.client_key }}" data-name="{{ row.display_name }}" aria-labelledby="limit-{{ loop.index }}-label name-{{ loop.index }}" aria-describedby="limit-{{ loop.index }}-unit">
+      <span class="ds-inline-edit__unit" id="limit-{{ loop.index }}-unit">an hour</span>
+    </div><span class="ds-card__go">Details<svg aria-hidden="true"><use href="#i-chev"/></svg></span></div>
+  </article>
+{% endfor %}
+</div>
+{% endif %}
+</div>
+</section>
+{# The panel named by `panel` (a client's or Add client), open over the list; with none, a closed empty one for admin.js
+   to fill. Then the page's one toast and its two live regions. #}
+{% if panel %}{% include panel %}{% else %}<dialog class="ds-sheet" id="panel"></dialog>{% endif %}
+{% include "toast.html" %}
+{% endblock %}

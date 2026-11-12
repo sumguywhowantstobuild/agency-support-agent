@@ -1,0 +1,84 @@
+{
+  "name": "Ticket cleanup",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        0,
+        0
+      ],
+      "id": "182ad9c5-0f30-47be-a1f4-9cb237b5121a",
+      "name": "Schedule Trigger"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "select delete_old_tickets() as removed, delete_old_past_tickets() as past_tickets_removed;",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        224,
+        0
+      ],
+      "id": "ae5a0961-9698-42ad-92ce-a9dcdd488d92",
+      "name": "Execute a SQL query",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "content": "Daily at 3 a.m. New York: deletes tickets with no activity for 90 days (numbers kept in the stats tables, no text), and past tickets saved more than 12 months ago. See SETUP section 3."
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        448,
+        -272
+      ],
+      "id": "2e08fd75-b902-44a1-b80b-6ba2b9fbc0a7",
+      "name": "Sticky Note"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Schedule Trigger": {
+      "main": [
+        [
+          {
+            "node": "Execute a SQL query",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "tags": []
+}

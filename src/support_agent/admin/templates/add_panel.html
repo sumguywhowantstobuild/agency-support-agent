@@ -1,0 +1,86 @@
+{# The Add client panel: the <dialog> alone. clients.html includes it over the list; panel_alone.html carries it
+   by itself for a refused form. The title is an h2 and the section label an h3, under the page's h1 (Clients). #}
+{% macro invalid(field) %}{% if errors[field] %} aria-invalid="true"{% endif %}{% endmacro %}
+{% macro field_error(field, id) %}<span class="ds-form-field__error" id="{{ id }}">{{ errors[field] }}</span>{% endmacro %}
+    <dialog class="ds-sheet" id="panel" open aria-labelledby="add-title">
+      <div class="ds-sheet__grabber" aria-hidden="true"></div>
+      <div class="ds-sheet__head">
+        <div class="ds-sheet__heading">
+          <h2 class="ds-sheet__title" id="add-title" tabindex="-1">Add client</h2>
+        </div>
+        <a class="ds-button ds-button--icon ds-button--tonal" href="/clients" aria-label="Close panel"><svg aria-hidden="true"><use href="#i-x"/></svg></a>
+      </div>
+      <div class="ds-sheet__body">
+        <section class="ds-sheet__section" aria-labelledby="add-before">
+          <div class="ds-sheet__label"><h3 id="add-before">Before you start</h3></div>
+          <ol class="ds-card ds-card--group ds-card__list">
+            <li class="ds-card__row"><span class="ds-card__row-text">Create the client's shared Slack channel.</span></li>
+            <li class="ds-card__row"><span class="ds-card__row-text">Invite the client to it.</span></li>
+            <li class="ds-card__row"><span class="ds-card__row-text">Add the support bot to it.</span></li>
+          </ol>
+        </section>
+        <form class="ds-sheet__section" method="post" action="/clients/new" novalidate aria-labelledby="add-title">
+          <div class="ds-card ds-card--group">
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="add-channel">Slack channel</label>
+              <span class="ds-select">
+                <select class="ds-select__control" id="add-channel" name="channel_id"{{ invalid("channel_id") }} aria-describedby="add-channel-help add-channel-error"><button><selectedcontent></selectedcontent></button>
+                  {# After a refusal about the channel the browser would pick the first one by itself, and the next Add could go to the wrong channel: a blank option, selected, makes the person choose again. #}
+                  {% if errors.channel_id %}
+                  <option value="" selected>Choose a channel</option>
+                  {% endif %}
+                  {% for channel in channels or [] %}
+                  <option value="{{ channel.id }}"{% if channel.id == form.channel_id %} selected{% endif %}>#{{ channel.name }}</option>
+                  {% endfor %}
+                </select>
+              </span>
+              {% if channels is none %}
+              <span class="ds-form-field__help" id="add-channel-help">Can't load the support bot's Slack channels right now. Reload in a minute.</span>
+              {% elif not channels %}
+              <span class="ds-form-field__help" id="add-channel-help">The support bot isn't in a channel without a client yet. Add it to the client's channel in Slack, then reload.</span>
+              {% else %}
+              <span class="ds-form-field__help" id="add-channel-help">Channels the support bot is in that no client uses yet.</span>
+              {% endif %}
+              {{ field_error("channel_id", "add-channel-error") }}
+            </div>
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="add-name">Client name</label>
+              <input class="ds-text-input" id="add-name" name="name" autocomplete="organization" maxlength="80" value="{{ form.name }}"{{ invalid("name") }} aria-describedby="add-name-error">
+              {{ field_error("name", "add-name-error") }}
+            </div>
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="add-limit">Drafts an hour</label>
+              <input class="ds-text-input" id="add-limit" name="limit" inputmode="numeric" autocomplete="off" value="{{ form.limit }}"{{ invalid("limit") }} aria-describedby="add-limit-help add-limit-error">
+              <span class="ds-form-field__help" id="add-limit-help">1 to 200. You can change it later.</span>
+              {{ field_error("limit", "add-limit-error") }}
+            </div>
+          </div>
+          <div class="ds-card ds-card--group">
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="add-location">HighLevel location ID</label>
+              <input class="ds-text-input ds-text-input--mono" id="add-location" name="location_id" autocomplete="off" spellcheck="false" value="{{ form.location_id }}"{{ invalid("location_id") }} aria-describedby="add-location-error">
+              {{ field_error("location_id", "add-location-error") }}
+            </div>
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="add-key">HighLevel token</label>
+              {# Never given a value: the key is typed again after any refusal, so the key never comes back in a page. #}
+              <div class="ds-text-input__group">
+                <input class="ds-text-input ds-text-input--secret" id="add-key" name="key" type="password" autocomplete="off" spellcheck="false" autocapitalize="off" autocorrect="off" data-1p-ignore data-lpignore="true" data-bwignore{{ invalid("key") }} aria-describedby="add-key-help add-key-error">
+                {# Shown by admin.js; without the script, Add client runs the same test before it saves. #}
+                <button type="button" class="ds-button" id="add-test" hidden>Test</button>
+              </div>
+              <span class="ds-form-field__help" id="add-key-help">Typed once, stored encrypted, never shown again.</span>
+              {{ field_error("key", "add-key-error") }}
+            </div>
+          </div>
+          <div id="add-test-result" role="status"></div>
+          {% if error %}
+          <div class="ds-alert ds-alert--fail" role="alert"><svg aria-hidden="true"><use href="#i-x"/></svg><div class="ds-alert__body">{{ error }}</div></div>
+          {% endif %}
+          <div class="ds-sheet__actions">
+            <button type="submit" class="ds-button ds-button--accent">Add client</button>
+            <a class="ds-button ds-button--plain" href="/clients">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </dialog>

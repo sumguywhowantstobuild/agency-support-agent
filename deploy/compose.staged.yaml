@@ -1,0 +1,15 @@
+# Turns deploy/compose.yaml into a staged server: the server's own project and data, with
+# everything that reaches outside switched off until a person turns it on. Never the tunnel (Slack must not reach a
+# system that isn't checked yet, and a second connector would split live's traffic) and never the backup service (it
+# would upload into whichever bucket .env names). deploy/restore.sh staged also unpublishes every n8n workflow and
+# removes the Slack login and the Healthchecks address. Used for a trial run on a rented server and for moving the
+# system to a new machine (SETUP section 11). Going live afterwards is not only a restart: first recreate the Slack login, store the
+# Slack signing secret and the Healthchecks address (SETUP sections 9 and 13), put the admin app's real Access settings
+# and Slack bot token in .env and its route behind Access (section 14), then `up -d` with deploy/compose.yaml alone
+# (the workflows still unpublished). Only then is the admin app running and reachable: sign in, enter each client's
+# HighLevel key, and only after that publish the workflows. No ports: the editor is reached over SSH.
+services:
+  backup:
+    profiles: ["never-when-staged"] # restore.sh still runs its image once, for the restore itself
+  tunnel:
+    profiles: ["never-when-staged"]

@@ -1,0 +1,45 @@
+[project]
+name = "support-agent"
+version = "1.8.0"
+description = "An AI agent that drafts support-ticket answers for a GoHighLevel agency; staff approve every draft in Slack"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2",
+    "pydantic-settings>=2",
+    "openai>=3,<4",
+    "psycopg[binary]>=3.3,<4",
+    "psycopg-pool>=3.3,<4",
+    "fastapi>=0.142,<1",
+    "uvicorn>=0.54,<1",
+    "mcp>=2.3,<3",  # official MCP SDK: the client for GHL's MCP server
+    "anyio>=4.5,<5",  # runs the async MCP client from our synchronous agent
+    "pynacl>=1.6,<2",  # locks client keys: the admin app seals, only the agent opens
+    "jinja2>=3.1,<4",  # the admin app's pages
+    "pyjwt[crypto]>=2.10,<3",  # checks Cloudflare Access's signed pass on every admin request
+    "httpx2>=2,<3",  # the admin app's calls to Slack and the agent; openai and mcp lock it already
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pyyaml>=6.0.3",
+    "playwright>=1.64,<2",  # the admin app's scripts and screens in real browsers
+    "pytest-playwright>=0.10,<1",  # --headed and --slowmo, to watch a run
+    "axe-playwright-python>=0.1.8,<0.2",  # axe-core (MPL-2.0) inside Playwright: each screen's accessibility scan
+    "pytest-xdist>=3.8,<4",  # MIT; pytest -n 8 splits a run across 8 processes: three browsers in 5 to 7 minutes, not 14
+]  # development machine only; the container installs without them
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+support_agent = ["admin/templates/*.html", "admin/static/**/*"]  # the admin app's pages and styles go into the image
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

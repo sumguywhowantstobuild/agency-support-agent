@@ -1,0 +1,16 @@
+{# The page's one toast and its two live regions, empty until admin.js writes a message (design system toast); used by
+   Clients and Staff (with or without a panel) and by a panel-alone answer, so the script starts there too. Its own
+   data-ds-key, and the nav bar's: an element without one is drawn under the tiles while they move. Undo submits the form
+   #undo, which is there only after a change that can be reversed. `undo` says its whole address and what it posts. #}
+{% if undo %}
+<form id="undo" method="post" action="{{ undo.address }}" hidden>
+  {% for name, value in undo.fields.items() %}<input type="hidden" name="{{ name }}" value="{{ value }}">{% endfor %}
+</form>
+{% endif %}
+<div class="ds-toast" id="toast" popover="manual" data-ds-key="toast"{% if toast %} data-toast="{{ toast }}"{% endif %}{% if undo %} data-undo="undo"{% endif %}>
+  <span class="ds-toast__text"></span>
+  <button type="button" class="ds-button ds-button--plain ds-toast__action" hidden>Undo</button>
+  <button type="button" class="ds-button ds-button--icon ds-toast__close" aria-label="Close message"><svg aria-hidden="true"><use href="#i-x"/></svg></button>
+</div>
+<div class="ds-toast__region" role="status" aria-live="polite"></div>
+<div class="ds-toast__region" role="alert"></div>

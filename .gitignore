@@ -1,0 +1,14 @@
+research/
+.env
+.venv/
+__pycache__/
+*.egg-info/
+.env.copy
+deploy/.tested
+deploy/.scans/
+
+# The test copy's sign-in keys (scripts/mint_test_pass.py): copy only, never committed.
+.admin-test-keys.json
+
+# Accuracy test reports: generated output (evals/README.md keeps the results).
+evals/reports/

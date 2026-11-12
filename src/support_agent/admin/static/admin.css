@@ -1,0 +1,9 @@
+/* The admin app's page base: background, text colour, font. Nothing else here: anything a screen needs beyond this
+   goes in the style files under ds/. */
+
+body {
+  margin: 0;
+  background: var(--ds-color-bg-canvas);
+  color: var(--ds-color-text-primary);
+  font-family: var(--ds-font-family-sans);
+}

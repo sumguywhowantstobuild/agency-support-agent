@@ -1,0 +1,57 @@
+<!doctype html>
+{# Dark and open are what a first visit and a page without the script keep; admin.js, loaded before the styles, swaps in
+   what this browser kept before anything paints. #}
+<html lang="en" data-theme="dark" data-side-nav="open" data-mode="productive" data-client="bluejay">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Bluejay support admin{% endblock %}</title>
+  <link rel="icon" type="image/svg+xml" href="{{ static_url('favicon.svg') }}">
+  <script src="{{ static_url('admin.js') }}"></script>
+  <script src="{{ static_url('ds/ds-motion.js') }}" defer></script>
+  <link rel="stylesheet" href="{{ static_url('ds/ds.css') }}">
+  <link rel="stylesheet" href="{{ static_url('ds/clients/bluejay.css') }}">
+  <link rel="stylesheet" href="{{ static_url('ds/ds-components.css') }}">
+  <link rel="stylesheet" href="{{ static_url('admin.css') }}">
+</head>
+<body>
+  <svg display="none" aria-hidden="true">{{ icon_symbols }}</svg>
+{% if staff %}
+  <div class="ds-shell">
+    <div class="ds-side-nav" data-ds-key="nav">
+      <div class="ds-side-nav__top">
+        <span class="ds-side-nav__brand">
+          {% include "logo.html" %}
+          <span class="ds-side-nav__label"><span class="ds-side-nav__name">Bluejay</span><span class="ds-side-nav__sub">Support admin</span></span>
+        </span>
+        <button class="ds-side-nav__toggle" type="button" data-side-nav-toggle aria-label="Collapse the menu" title="Collapse the menu" aria-expanded="true" hidden><svg aria-hidden="true"><use href="#i-collapse"/></svg></button>
+      </div>
+      <nav class="ds-side-nav__links" aria-label="Main">
+        {% for path, label, icon in [("/clients", "Clients", "i-clients"), ("/staff", "Staff", "i-staff"), ("/history", "History", "i-history")] %}
+        <a class="ds-side-nav__link" href="{{ path }}"{% if current == label | lower %} aria-current="page"{% endif %} title="{{ label }}"><svg aria-hidden="true"><use href="#{{ icon }}"/></svg><span class="ds-side-nav__label" data-label="{{ label }}">{{ label }}</span></a>
+        {% endfor %}
+      </nav>
+      {# The person: one button that opens a native popover (no script needed). Its spoken name starts with the visible
+         name. No role="menu": that would promise arrow keys. Sign out only behind a real Cloudflare team; its address is
+         fixed (settings.sign_out) and Cloudflare answers it at its edge, never this app. #}
+      <div class="ds-side-nav__who" id="who">
+        <button class="ds-side-nav__person" type="button" popovertarget="person-menu" aria-label="{{ staff.name }}, Support team, account menu"><span class="ds-side-nav__avatar" aria-hidden="true">{{ staff.name[:1] | upper }}</span><span class="ds-side-nav__label"><span class="ds-side-nav__name">{{ staff.name }}</span><span class="ds-side-nav__sub">Support team</span></span></button>
+        <div class="ds-side-nav__menu" id="person-menu" popover>
+          <h2 class="ds-side-nav__menu-name">{{ staff.name }}</h2>
+{% if sign_out %}
+          <a class="ds-side-nav__menu-item" href="{{ sign_out }}">Sign out</a>
+{% endif %}
+        </div>
+      </div>
+    </div>
+    <div class="ds-shell__main">
+{% endif %}
+      <main class="ds-page">
+{% block content %}{% endblock %}
+      </main>
+{% if staff %}
+    </div>
+  </div>
+{% endif %}
+</body>
+</html>

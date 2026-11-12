@@ -1,0 +1,437 @@
+{
+  "name": "Health check",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "minutes",
+              "minutesInterval": 5
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "0901613f-b6bb-5735-ab00-39eba5b9cc4d",
+      "name": "Every 5 minutes"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        0,
+        200
+      ],
+      "id": "f1c00ffe-ca05-5ed0-9b25-59f2d3b3ea69",
+      "name": "Run now (test)"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "20d4b6ba-7743-50b3-89a4-5ec22f44ccbf",
+              "name": "alerts_channel",
+              "value": "PASTE_ALERTS_CHANNEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "06f7475f-8232-584e-9a1d-4ace1643bfc0",
+              "name": "agent_health_url",
+              "value": "http://agent:8000/health",
+              "type": "string"
+            },
+            {
+              "id": "83a47e92-b30e-5bc7-9f03-72e1dabaea85",
+              "name": "public_health_url",
+              "value": "PASTE_PUBLIC_HEALTH_URL",
+              "type": "string"
+            },
+            {
+              "id": "f7cce0a2-19a6-5796-a661-4c421cd0ff1c",
+              "name": "embedding_model",
+              "value": "text-embedding-3-small",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        220,
+        100
+      ],
+      "id": "5c2da388-ae05-5348-978c-530770c87aa4",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Settings').first().json.agent_health_url }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        440,
+        100
+      ],
+      "id": "6e2dd30c-a2a5-58f2-9579-fbff3642dd0e",
+      "name": "Check agent",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "url": "={{ $('Settings').first().json.public_health_url }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        660,
+        100
+      ],
+      "id": "41aae646-aec4-52dc-95d7-fa53fdaf10f9",
+      "name": "Check tunnel",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Settings').first().json.embedding_model, input: 'ok' }) }}",
+        "options": {
+          "timeout": 10000,
+          "response": {
+            "response": {
+              "fullResponse": true,
+              "neverError": true
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        880,
+        100
+      ],
+      "id": "bdecc63c-db3c-5168-b9d1-91f3d405c8d7",
+      "name": "Check OpenAI",
+      "onError": "continueRegularOutput",
+      "credentials": {
+        "openAiApi": {
+          "id": "PASTE_CREDENTIAL_ID_N8N_KB_SYNC",
+          "name": "n8n-kb-sync"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Which parts are fine, from the three checks above. Each check keeps going when it fails (its output then holds the\n// error), so this step always runs and every part is reported.\nconst s = $('Settings').first().json;\nfor (const [name, value] of Object.entries(s)) {\n  if (!String(value ?? '').trim() || String(value).startsWith('PASTE_')) {\n    throw new Error(`Settings: ${name} is not filled in. Nothing was checked.`);\n  }\n}\nconst short = (t) => String(t ?? '').replace(/\\s+/g, ' ').trim().slice(0, 200);\nconst result = (step) => {\n  const r = $(step).first().json;\n  if (r.error) return { status: 0, body: null, error: short(r.error.message ?? r.error) };\n  return { status: r.statusCode, body: r.body, error: '' };\n};\nconst why = (r) => r.error || `answered ${r.status}`;\nconst agent = result('Check agent');\nconst tunnel = result('Check tunnel');\nconst openai = result('Check OpenAI');\nconst openaiCode = openai.body?.error?.code ?? openai.body?.error?.type ?? '';\nconst parts = [\n  { part: 'agent', ok: agent.status === 200 && agent.body?.ok === true, detail: why(agent) },\n  { part: 'tunnel', ok: tunnel.status === 200, detail: why(tunnel) },\n  { part: 'openai', ok: openai.status === 200, detail: openaiCode ? `${openai.status} ${short(openaiCode)}` : why(openai) },\n];\nfor (const p of parts) if (p.ok) p.detail = null;\nconst failing = parts.filter((p) => !p.ok);\nreturn [{ json: {\n  parts,\n  all_ok: failing.length === 0,\n  summary: failing.length ? failing.map((p) => `${p.part}: ${p.detail}`).join('; ') : 'all well',\n} }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        100
+      ],
+      "id": "057a16c4-8157-5e27-8ede-641b4138dcc8",
+      "name": "Results"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Each part's result goes to monitor_report(), which answers only on a change: \"down\" when a part just failed,\n-- \"back\" when it just recovered. No row back: nothing changed, so nothing is posted.\nselect p.part, r.change, r.down_since, extract(epoch from r.down_for)::int as down_seconds, p.detail\nfrom json_to_recordset($1::json) as p(part text, ok boolean, detail text)\ncross join lateral monitor_report(p.part, p.ok, p.detail) as r;",
+        "options": {
+          "queryReplacement": "={{ [ JSON.stringify($json.parts) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1320,
+        0
+      ],
+      "id": "0d5daa75-85fa-56b7-86cd-6a91ba713f30",
+      "name": "Report changes",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// One Slack message per change: monitor_report answered \"down\" (just failed) or \"back\" (just recovered). Nothing\n// posts while a part stays down or stays fine, so this never repeats every 5 minutes.\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst at = (t) => DateTime.fromJSDate(new Date(t)).setZone($now.zone).toFormat('HH:mm ZZZZ'); // n8n's time zone (New York), named\nconst mins = (sec) => {\n  const m = Math.max(1, Math.round(Number(sec ?? 0) / 60));\n  return m < 120 ? `${m} min` : `${Math.round(m / 60)} h`;\n};\nconst DOWN = {\n  agent: 'The agent is down',\n  tunnel: \"Slack can't reach n8n (the Cloudflare tunnel or the public address)\",\n  openai: \"OpenAI isn't answering\",\n};\nconst EFFECT = {\n  agent: 'New tickets get an \"agent unavailable\" card until it is back.',\n  tunnel: \"Client messages may not become tickets until it is back.\",\n  openai: 'Drafts fail until it is back.',\n};\nconst BACK = { agent: 'The agent is back', tunnel: 'Slack reaches n8n again', openai: 'OpenAI answers again' };\nconst SPENDING = /spend_limit|credit_balance|insufficient_quota/;\n\nreturn $input.all().map(({ json: r }) => {\n  let text;\n  if (r.change === 'back') {\n    text = `:large_green_circle: *${BACK[r.part] ?? r.part}* after ${mins(r.down_seconds)} (down since ${at(r.down_since)}).`;\n  } else if (r.part === 'openai' && SPENDING.test(r.detail ?? '')) {\n    text = `:red_circle: *OpenAI refuses AI calls: the spending limit or the prepaid credit ran out* (${esc(r.detail)}), `\n      + `since ${at(r.down_since)}. No drafts until it is raised: platform.openai.com, your OpenAI project, `\n      + 'Limits (or Billing for credit).';\n  } else {\n    text = `:red_circle: *${DOWN[r.part] ?? r.part}* since ${at(r.down_since)}: ${esc(r.detail)}. ${EFFECT[r.part] ?? ''}`;\n  }\n  return { json: { text } };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "fb7d2ebd-f55a-5f25-8dd7-fac333bfca31",
+      "name": "Build alert"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.alerts_channel }}"
+        },
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "bdedc522-19fb-5f51-b004-eddff8475b72",
+      "name": "Post alert",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      },
+      "webhookId": "373d8f22-1df5-5f48-b85a-b9365a766355",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Where to tell the outside watcher (Healthchecks.io). Only a hc-ping.com address counts, so a wrong setting means\n-- silence (and an email from the watcher), never data sent somewhere else. The test copy has no address: no ping.\n-- Also the parts that are down right now (2 failed checks in a row), read after this run's report: the watcher hears\n-- \"failing\" for those only, so a single blip doesn't email either.\nselect s.value as ping_url,\n       coalesce((select string_agg(m.part || ': ' || coalesce(m.detail, ''), '; ' order by m.part)\n                 from monitor_state m where m.down_since is not null), '') as down_parts\nfrom system_settings s\nwhere s.name = 'healthchecks_ping_url' and s.value ~ '^https://hc-ping[.]com/[A-Za-z0-9_/-]+$';",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1320,
+        220
+      ],
+      "id": "932732dc-20e5-589b-90f3-4ab761c51271",
+      "name": "Read ping address",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $json.ping_url + ($json.down_parts ? '/fail' : '') }}",
+        "sendBody": true,
+        "contentType": "raw",
+        "rawContentType": "text/plain",
+        "body": "={{ $json.down_parts || 'all well' }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1540,
+        220
+      ],
+      "id": "b68cbafb-c80f-5b63-803f-748ba9943548",
+      "name": "Tell the watcher",
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "path": "health",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        420
+      ],
+      "id": "70114086-34b6-5275-aad7-192c5f87a4b7",
+      "name": "Health address",
+      "webhookId": "a934a6b2-0b69-53ad-8504-b8d26f3f13ca"
+    },
+    {
+      "parameters": {
+        "content": "Every 5 minutes: checks the agent, the public address (tunnel) and OpenAI (a one-word embedding, a tiny real AI call, so a spending limit shows here). Posts to #support-alerts only when a part goes down or comes back. All well: tells Healthchecks.io; if those signals stop (PC, Docker or n8n down), it emails the owner. The /webhook/health address only answers, for the tunnel check.",
+        "height": 200,
+        "width": 420
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        440,
+        -260
+      ],
+      "id": "ef40b35b-2650-5ca6-a83c-8aafcac0e416",
+      "name": "Sticky Note"
+    }
+  ],
+  "connections": {
+    "Every 5 minutes": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run now (test)": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Check agent",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check agent": {
+      "main": [
+        [
+          {
+            "node": "Check tunnel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check tunnel": {
+      "main": [
+        [
+          {
+            "node": "Check OpenAI",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check OpenAI": {
+      "main": [
+        [
+          {
+            "node": "Results",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Results": {
+      "main": [
+        [
+          {
+            "node": "Report changes",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Read ping address",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Report changes": {
+      "main": [
+        [
+          {
+            "node": "Build alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build alert": {
+      "main": [
+        [
+          {
+            "node": "Post alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read ping address": {
+      "main": [
+        [
+          {
+            "node": "Tell the watcher",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner",
+    "saveDataSuccessExecution": "none",
+    "saveManualExecutions": true
+  },
+  "pinData": {},
+  "active": false
+}

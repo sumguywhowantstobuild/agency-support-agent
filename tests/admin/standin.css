@@ -1,0 +1,28 @@
+/* A stand-in client's colours, for the screen check that a client's layer changes colours and nothing else. */
+
+[data-mode="productive"][data-client="standin"] {
+  --ds-brand-name: "Standin Co";
+  --ds-brand-short-mark: "SC";
+  --ds-color-accent-default: #b45309;
+  --ds-color-accent-hover: #92400e;
+  --ds-color-accent-text: #92400e;
+  --ds-color-focus-ring: #b45309;
+}
+
+[data-theme="dark"] [data-mode="productive"][data-client="standin"],
+[data-mode="productive"][data-client="standin"][data-theme="dark"] {
+  --ds-color-accent-default: #fb923c;
+  --ds-color-accent-hover: #fdba74;
+  --ds-color-accent-text: #fdba74;
+  --ds-color-focus-ring: #fb923c;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) [data-mode="productive"][data-client="standin"]:not([data-theme="light"]),
+  :root[data-mode="productive"][data-client="standin"]:not([data-theme="light"]) {
+    --ds-color-accent-default: #fb923c;
+    --ds-color-accent-hover: #fdba74;
+    --ds-color-accent-text: #fdba74;
+    --ds-color-focus-ring: #fb923c;
+  }
+}

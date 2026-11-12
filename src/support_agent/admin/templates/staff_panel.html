@@ -1,0 +1,49 @@
+{# One staff member's panel: the <dialog> alone. staff.html includes it over the list; panel_alone.html
+   carries it by itself for a refused form. The title is an h2 and the section labels h3s, under the page's h1 (Staff). #}
+{% macro invalid(field) %}{% if errors[field] %} aria-invalid="true"{% endif %}{% endmacro %}
+{# email_off: Cloudflare leaves the address inside alone, or live shows "[email protected]" (its script can't run under our header). #}
+{% macro field_error(field, id) %}<span class="ds-form-field__error" id="{{ id }}"><!--email_off-->{{ errors[field] }}<!--/email_off--></span>{% endmacro %}
+    <dialog class="ds-sheet" id="panel" open aria-labelledby="sheet-title">
+      <div class="ds-sheet__grabber" aria-hidden="true"></div>
+      <div class="ds-sheet__head">
+        <div class="ds-sheet__heading">
+          <h2 class="ds-sheet__title" id="sheet-title" tabindex="-1">{{ member.name }}</h2>
+          <span class="ds-sheet__sub"><!--email_off-->{{ member.email }}<!--/email_off--></span>
+          {% if member.active %}
+          <span class="ds-status ds-status--ok"><svg aria-hidden="true"><use href="#i-check"/></svg><span class="ds-status__label">Active</span></span>
+          {% else %}
+          <span class="ds-status ds-status--idle"><svg aria-hidden="true"><use href="#i-pause"/></svg><span class="ds-status__label">Deactivated</span></span>
+          {% endif %}
+        </div>
+        <a class="ds-button ds-button--icon ds-button--tonal" href="/staff" aria-label="Close panel"><svg aria-hidden="true"><use href="#i-x"/></svg></a>
+      </div>
+      <div class="ds-sheet__body">
+        <form class="ds-sheet__section" method="post" action="/staff/{{ member.id }}/edit" novalidate aria-labelledby="sheet-details">
+          <div class="ds-sheet__label"><h3 id="sheet-details">Details</h3></div>
+          {% include "staff_fields.html" %}
+          <div class="ds-sheet__actions">
+            <button type="submit" class="ds-button ds-button--accent">Save</button>
+            <a class="ds-button ds-button--plain" href="/staff">Cancel</a>
+          </div>
+        </form>
+        <section class="ds-sheet__section" aria-labelledby="sheet-access">
+          <div class="ds-sheet__label"><h3 id="sheet-access">Access</h3></div>
+          <form class="ds-card ds-card--group" method="post" action="/staff/{{ member.id }}/active">
+          {% if member.active %}
+            <input type="hidden" name="active" value="false">
+            <div class="ds-card__row"><span class="ds-card__row-text"><span class="ds-card__row-title">Deactivate</span><span class="ds-card__row-hint">They can't sign in here or approve drafts in Slack from their next click. Their past changes keep their name.</span></span><button type="submit" class="ds-button ds-button--danger">Deactivate</button></div>
+          {% else %}
+            <input type="hidden" name="active" value="true">
+            <div class="ds-card__row"><span class="ds-card__row-text"><span class="ds-card__row-title">Reactivate</span><span class="ds-card__row-hint">They can sign in and approve drafts again.</span></span><button type="submit" class="ds-button">Reactivate</button></div>
+          {% endif %}
+            {% if errors.active %}<div class="ds-card__row"><div class="ds-alert ds-alert--fail" role="alert"><svg aria-hidden="true"><use href="#i-x"/></svg><div class="ds-alert__body">{{ errors.active }}</div></div></div>{% endif %}
+          </form>
+        </section>
+        <section class="ds-sheet__section" aria-labelledby="sheet-changes">
+          <div class="ds-sheet__label"><h3 id="sheet-changes">History</h3></div>
+          <div class="ds-card ds-card--group">
+            <div class="ds-card__row"><a class="ds-link" href="/history?person={{ member.name | urlencode }}">Changes made by {{ member.name }}</a></div>
+          </div>
+        </section>
+      </div>
+    </dialog>

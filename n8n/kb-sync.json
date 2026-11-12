@@ -1,0 +1,632 @@
+{
+  "name": "KB Sync",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "hours"
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.4,
+      "position": [
+        -80,
+        -112
+      ],
+      "id": "5f161f67-417e-4b3a-9c52-dd68b4f035f9",
+      "name": "Every hour"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -80,
+        80
+      ],
+      "id": "9a8f74fd-6500-4252-b295-8f760a34bbb1",
+      "name": "Run now"
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "3aa185ca-4672-48ec-a060-d9568da18564",
+              "name": "guides_folder_id",
+              "value": "PASTE_GUIDES_FOLDER_ID",
+              "type": "string"
+            },
+            {
+              "id": "8ad1eb39-0319-40bf-b775-45880e463737",
+              "name": "ghl_help_folder_id",
+              "value": "PASTE_GHL_HELP_FOLDER_ID",
+              "type": "string"
+            },
+            {
+              "id": "9803b3be-226c-446e-a297-e67a8d35a800",
+              "name": "embedding_model",
+              "value": "text-embedding-3-small",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        144,
+        -16
+      ],
+      "id": "b58430f6-03e8-4f6d-a157-cc56657bd3e1",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// One item per Drive folder, tagged with the knowledge source it feeds.\nconst s = $input.first().json;\nconst folders = [\n  { source: 'guide', folder_id: s.guides_folder_id },\n  { source: 'ghl_help', folder_id: s.ghl_help_folder_id },\n];\nfor (const f of folders) {\n  if (!f.folder_id || !String(f.folder_id).trim()) {\n    throw new Error(`Settings: no folder ID for ${f.source}. Nothing was changed.`);\n  }\n}\nreturn folders.map((f) => ({ json: f }));"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        368,
+        -16
+      ],
+      "id": "eee0f3fc-440f-4c1d-99fc-acc4a7a52cb7",
+      "name": "One item per folder"
+    },
+    {
+      "parameters": {
+        "url": "https://www.googleapis.com/drive/v3/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "q",
+              "value": "='{{ $json.folder_id }}' in parents and mimeType = 'application/vnd.google-apps.document' and trashed = false"
+            },
+            {
+              "name": "fields",
+              "value": "nextPageToken,files(id,name,modifiedTime,webViewLink)"
+            },
+            {
+              "name": "pageSize",
+              "value": "1000"
+            },
+            {
+              "name": "supportsAllDrives",
+              "value": "true"
+            },
+            {
+              "name": "includeItemsFromAllDrives",
+              "value": "true"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        592,
+        -16
+      ],
+      "id": "0dd84249-6c77-4f9f-8bca-67e90ff60e69",
+      "name": "List Docs",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleApi": {
+          "id": "PASTE_CREDENTIAL_ID_GOOGLE_DRIVE",
+          "name": "Google Drive (kb sync, read-only)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Safety rule: a listing that is empty, incomplete or missing stops the run before anything is deleted.\n// Drive answers a wrong or unshared folder ID with an empty list, not an error.\nconst folders = $('One item per folder').all();\nconst listings = $input.all();\nif (listings.length !== folders.length) {\n  throw new Error(`Expected ${folders.length} Drive listings, got ${listings.length}. Nothing was changed.`);\n}\nconst docs = [];\nlistings.forEach((item, i) => {\n  const { source, folder_id } = $('One item per folder').itemMatching(i).json;\n  const { files, nextPageToken } = item.json;\n  if (!Array.isArray(files) || files.length === 0) {\n    throw new Error(`Drive listing for ${source} (folder ${folder_id}) came back empty. Wrong folder ID, or not shared with the service account? Nothing was changed.`);\n  }\n  if (nextPageToken) {\n    throw new Error(`Drive listing for ${source} has more than 1000 Docs and is incomplete. Nothing was changed.`);\n  }\n  for (const f of files) {\n    docs.push({ json: { doc_id: f.id, title: f.name, modified_time: f.modifiedTime, doc_url: f.webViewLink, source } });\n  }\n});\nreturn docs;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        816,
+        -16
+      ],
+      "id": "3ca49bb7-30fc-49bf-bb0c-405a6dc2e905",
+      "name": "Check listings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Compare Drive's list of Docs with what the knowledge base holds. Returns only Docs that need work.\n-- Only guide and ghl_help rows are looked at, so past_ticket rows can never be deleted here.\nwith drive as (\n  select *\n  from jsonb_to_recordset($1::jsonb)\n    as d(doc_id text, title text, modified_time timestamptz, doc_url text, source text)\n),\nstored as (\n  select metadata->>'doc_id' as doc_id,\n         min(metadata->>'source') as source,\n         min(metadata->>'content_hash') as content_hash,\n         min((metadata->>'updated_at')::timestamptz) as updated_at\n  from documents\n  where metadata->>'source' in ('guide', 'ghl_help')\n  group by 1\n)\nselect coalesce(d.doc_id, s.doc_id) as doc_id,\n       d.title, d.modified_time, d.doc_url,\n       coalesce(d.source, s.source) as source,\n       s.content_hash as stored_hash,\n       case when d.doc_id is null then 'delete' else 'process' end as action,\n       case\n         when d.doc_id is null then 'gone from Drive'\n         when s.doc_id is null then 'new'\n         when d.source is distinct from s.source then 'moved folder'\n         else 'edited'\n       end as reason\nfrom drive d\nfull outer join stored s on s.doc_id = d.doc_id\nwhere d.doc_id is null\n   or s.doc_id is null\n   or d.source is distinct from s.source\n   or d.modified_time > s.updated_at;",
+        "options": {
+          "queryReplacement": "={{ JSON.stringify($input.all().map(item => item.json)) }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1040,
+        -16
+      ],
+      "id": "6f9638fc-72a7-4635-bfcd-dad1a51c321f",
+      "name": "Compare",
+      "executeOnce": true,
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_KNOWLEDGE_DB",
+          "name": "Knowledge DB (kb_sync)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "rules": {
+          "values": [
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "process",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals"
+                    },
+                    "id": "7dd787aa-3ef8-439e-8408-c8cabe2eee28"
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Process"
+            },
+            {
+              "conditions": {
+                "options": {
+                  "caseSensitive": true,
+                  "leftValue": "",
+                  "typeValidation": "strict",
+                  "version": 3
+                },
+                "conditions": [
+                  {
+                    "id": "c739236b-b4b4-4e2d-8ed8-da4c09f88f4b",
+                    "leftValue": "={{ $json.action }}",
+                    "rightValue": "delete",
+                    "operator": {
+                      "type": "string",
+                      "operation": "equals",
+                      "name": "filter.operator.equals"
+                    }
+                  }
+                ],
+                "combinator": "and"
+              },
+              "renameOutput": true,
+              "outputKey": "Delete"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.switch",
+      "typeVersion": 3.4,
+      "position": [
+        1264,
+        -16
+      ],
+      "id": "fd8fef9c-91f1-429b-9688-67fa9b298e11",
+      "name": "Route"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Remove every passage of a Doc that is no longer in Drive. Never touches past_ticket rows.\ndelete from documents\nwhere metadata->>'doc_id' = $1\n  and metadata->>'source' in ('guide', 'ghl_help');",
+        "options": {
+          "queryReplacement": "={{ $json.doc_id }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        1488,
+        80
+      ],
+      "id": "db1e0f71-f4c9-4911-8dcd-9f42ee097c62",
+      "name": "Delete gone Docs",
+      "executeOnce": false,
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_KNOWLEDGE_DB",
+          "name": "Knowledge DB (kb_sync)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://www.googleapis.com/drive/v3/files/{{ $json.doc_id }}/export",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "googleApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "mimeType",
+              "value": "text/markdown"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "text",
+              "outputPropertyName": "markdown"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        1488,
+        -112
+      ],
+      "id": "82e491cb-8773-4835-a15b-d0dfa887de5d",
+      "name": "Export as Markdown",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "googleApi": {
+          "id": "PASTE_CREDENTIAL_ID_GOOGLE_DRIVE",
+          "name": "Google Drive (kb sync, read-only)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "value": "={{ $('Route').item.json.source }}\n{{ $('Route').item.json.title }}\n{{ $json.markdown }}",
+        "dataPropertyName": "content_hash"
+      },
+      "type": "n8n-nodes-base.crypto",
+      "typeVersion": 2,
+      "position": [
+        1712,
+        -112
+      ],
+      "id": "8d0bed85-6cba-4e65-b751-cd4ecb1f5a04",
+      "name": "Hash"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "511f8660-c0eb-4b83-a878-9914d98f3790",
+              "leftValue": "={{ $json.content_hash }}",
+              "rightValue": "={{ $('Route').item.json.stored_hash ?? '' }}",
+              "operator": {
+                "type": "string",
+                "operation": "notEquals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        1936,
+        -112
+      ],
+      "id": "f50a78bc-3d7c-4b0f-8baf-7330fd9be871",
+      "name": "Text changed?"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn each exported Doc into passages: one per \"##\" section, long sections cut at paragraphs.\n// Doc details (title, source, link) come from the Route node; the text from the export.\nconst MAX_WORDS = 500;\n\nconst words = (s) => s.split(/\\s+/).filter(Boolean).length;\n\n// Google's Markdown export escapes characters like : [ ] + = . with a backslash. Undo that.\nconst unescape = (s) => s.replace(/\\\\([\\\\`*_{}\\[\\]()#+\\-.!=:<>|~])/g, '$1');\n\n// Cut a long section into balanced parts at blank lines (or at line breaks inside one huge block).\nfunction cut(body) {\n  const total = words(body);\n  if (total <= MAX_WORDS) return [body];\n  let blocks = body.split(/\\n{2,}/);\n  blocks = blocks.flatMap((b) => (words(b) > MAX_WORDS ? b.split('\\n') : [b]));\n  const target = total / Math.ceil(total / MAX_WORDS);\n  const parts = [];\n  let current = [];\n  let count = 0;\n  for (const block of blocks) {\n    const n = words(block);\n    if (count > 0 && count + n > target * 1.15) {\n      parts.push(current.join('\\n\\n'));\n      current = [];\n      count = 0;\n    }\n    current.push(block);\n    count += n;\n  }\n  if (current.length) parts.push(current.join('\\n\\n'));\n  return parts;\n}\n\nconst out = [];\nfor (const [i, item] of $input.all().entries()) {\n  const doc = $('Route').itemMatching(i).json;\n  const md = unescape(String(item.json.markdown ?? ''))\n    .replace(/\\r\\n?/g, '\\n')\n    .replace(/[ \\t]+$/gm, '')\n    .replace(/\\n{3,}/g, '\\n\\n')\n    .trim();\n  if (!md) throw new Error(`\"${doc.title}\" exported empty. Nothing was changed for it.`);\n\n  let lines = md.split('\\n');\n\n  // GHL help summaries start with \"Source: <link to the HighLevel article>\". Guides link to themselves.\n  let url = doc.doc_url.split('?')[0];\n  if (doc.source === 'ghl_help') {\n    const m = /^Source:\\s*(.+)$/.exec(lines[0]);\n    const link = m && (/\\((https:\\/\\/[^)\\s]+)\\)/.exec(m[1]) || /<(https:\\/\\/[^>\\s]+)>/.exec(m[1]) || /(https:\\/\\/\\S+)/.exec(m[1]));\n    if (!link) throw new Error(`\"${doc.title}\" has no \"Source: https://...\" first line. Nothing was changed for it.`);\n    url = link[1];\n    lines = lines.slice(1);\n  }\n\n  // Drop the \"# Title\" line: the title is stored separately and added to every passage below.\n  lines = lines.filter((l) => !/^# /.test(l));\n\n  // Split at \"## \" headings. Text before the first heading (the intro) joins the first section.\n  const sections = [];\n  const intro = [];\n  let current = null;\n  for (const line of lines) {\n    const h = /^## (.+)$/.exec(line);\n    if (h) {\n      current = { heading: h[1].trim(), body: [] };\n      sections.push(current);\n    } else if (current) {\n      current.body.push(line);\n    } else {\n      intro.push(line);\n    }\n  }\n  if (!sections.length) sections.push({ heading: doc.title, body: [] });\n  sections[0].body = [...intro, '', ...sections[0].body];\n\n  const passages = [];\n  for (const s of sections) {\n    const body = s.body.join('\\n').replace(/\\n{3,}/g, '\\n\\n').trim();\n    if (!body) continue;\n    const parts = cut(body);\n    parts.forEach((part, n) => {\n      const heading = parts.length > 1 ? `${s.heading} (part ${n + 1} of ${parts.length})` : s.heading;\n      // Title and heading go into the text too, so both word search and meaning search can match them.\n      passages.push({ heading, content: `${doc.title} > ${heading}\\n\\n${part}` });\n    });\n  }\n  if (!passages.length) throw new Error(`\"${doc.title}\" has no text to store. Nothing was changed for it.`);\n\n  out.push({\n    json: {\n      doc_id: doc.doc_id,\n      title: doc.title,\n      url,\n      source: doc.source,\n      modified_time: doc.modified_time,\n      content_hash: item.json.content_hash,\n      passages,\n    },\n  });\n}\nreturn out;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2160,
+        -208
+      ],
+      "id": "451bb42f-fc60-4593-be31-0310b2dcaa5f",
+      "name": "Split into passages"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The Doc was touched but nothing we store changed: record the new edit time, keep the passages.\nupdate documents\nset metadata = metadata || jsonb_build_object('updated_at', $2::text)\nwhere metadata->>'doc_id' = $1\n  and metadata->>'source' in ('guide', 'ghl_help');",
+        "options": {
+          "queryReplacement": "={{ [ $('Route').item.json.doc_id, $('Route').item.json.modified_time ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2160,
+        -16
+      ],
+      "id": "0d4de21b-0c43-4d6e-982b-30ceb024a4c9",
+      "name": "Mark unchanged",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_KNOWLEDGE_DB",
+          "name": "Knowledge DB (kb_sync)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.openai.com/v1/embeddings",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "openAiApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: $('Settings').first().json.embedding_model, input: $json.passages.map(p => p.content) }) }}",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        2384,
+        -208
+      ],
+      "id": "0d07a0f9-3ff0-4ac2-b476-83073dc0ed0b",
+      "name": "Embed",
+      "retryOnFail": true,
+      "waitBetweenTries": 5000,
+      "credentials": {
+        "openAiApi": {
+          "id": "PASTE_CREDENTIAL_ID_N8N_KB_SYNC",
+          "name": "n8n-kb-sync"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Pair each passage with its embedding, and check OpenAI returned one of the right size per passage.\nconst DIMENSIONS = 1536; // must match the database column: embedding vector(1536)\n\nreturn $input.all().map((item, i) => {\n  const doc = $('Split into passages').itemMatching(i).json;\n  const data = [...(item.json.data ?? [])].sort((a, b) => a.index - b.index);\n  if (data.length !== doc.passages.length) {\n    throw new Error(`\"${doc.title}\": ${doc.passages.length} passages but ${data.length} embeddings. Nothing was changed for it.`);\n  }\n  const rows = doc.passages.map((p, n) => {\n    const embedding = data[n].embedding;\n    if (!Array.isArray(embedding) || embedding.length !== DIMENSIONS) {\n      throw new Error(`\"${doc.title}\": embedding ${n + 1} has the wrong size. Nothing was changed for it.`);\n    }\n    return { content: p.content, heading: p.heading, embedding: JSON.stringify(embedding) };\n  });\n  return {\n    json: {\n      doc_id: doc.doc_id,\n      title: doc.title,\n      url: doc.url,\n      source: doc.source,\n      content_hash: doc.content_hash,\n      modified_time: doc.modified_time,\n      rows: JSON.stringify(rows),\n    },\n  };\n});"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2608,
+        -208
+      ],
+      "id": "d8b4d61e-7fe8-4249-979d-70e69c851e87",
+      "name": "Attach embeddings"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Replace all passages of one Doc in one statement: every old row goes and every new row arrives, or nothing changes.\nwith removed as (\n  delete from documents\n  where metadata->>'doc_id' = $1\n    and metadata->>'source' in ('guide', 'ghl_help')\n)\ninsert into documents (content, metadata, embedding)\nselect p.content,\n       jsonb_build_object(\n         'doc_id', $1::text, 'title', $2::text, 'heading', p.heading, 'url', $3::text,\n         'source', $4::text, 'content_hash', $5::text, 'updated_at', $6::text),\n       p.embedding::vector\nfrom jsonb_to_recordset($7::jsonb) as p(content text, heading text, embedding text);",
+        "options": {
+          "queryBatching": "independently",
+          "queryReplacement": "={{ [ $json.doc_id, $json.title, $json.url, $json.source, $json.content_hash, $json.modified_time, $json.rows ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        2832,
+        -208
+      ],
+      "id": "3bfbeb4a-e46a-44cd-b7cf-62e5550afb8a",
+      "name": "Save passages",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_KNOWLEDGE_DB",
+          "name": "Knowledge DB (kb_sync)"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Run now": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Every hour": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "One item per folder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "One item per folder": {
+      "main": [
+        [
+          {
+            "node": "List Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List Docs": {
+      "main": [
+        [
+          {
+            "node": "Check listings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Check listings": {
+      "main": [
+        [
+          {
+            "node": "Compare",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compare": {
+      "main": [
+        [
+          {
+            "node": "Route",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Route": {
+      "main": [
+        [
+          {
+            "node": "Export as Markdown",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Delete gone Docs",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Export as Markdown": {
+      "main": [
+        [
+          {
+            "node": "Hash",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Hash": {
+      "main": [
+        [
+          {
+            "node": "Text changed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Text changed?": {
+      "main": [
+        [
+          {
+            "node": "Split into passages",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Mark unchanged",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Split into passages": {
+      "main": [
+        [
+          {
+            "node": "Embed",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Embed": {
+      "main": [
+        [
+          {
+            "node": "Attach embeddings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Attach embeddings": {
+      "main": [
+        [
+          {
+            "node": "Save passages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "saveDataSuccessExecution": "none",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {
+    "templateCredsSetupCompleted": true
+  },
+  "nodeGroups": [],
+  "tags": []
+}

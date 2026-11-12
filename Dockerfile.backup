@@ -1,0 +1,17 @@
+# check=error=true
+# The nightly backup's container. Built on the same Postgres image as the database, so pg_dump is exactly
+# the server's version. Adds Python and its two libraries, and age for encryption, from Debian's own packages: not
+# pinned to exact versions like uv.lock (accepted: the base image is pinned, Debian stable only ships fixes).
+FROM pgvector/pgvector:0.8.7-pg18-trixie@sha256:9d9c930220cb9bf2f956d10a8f909cf9973d9672ca0278aef2c1e6facccad2e0
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends python3 python3-psycopg python3-boto3 age \
+    && rm -rf /var/lib/apt/lists/*
+# Only the backup code, not the agent: the rules (unit-tested outside the container), the nightly loop and the restore.
+COPY src/support_agent/__init__.py src/support_agent/backup.py src/support_agent/backup_job.py \
+     src/support_agent/restore_job.py /app/support_agent/
+ENV PYTHONPATH=/app PYTHONUNBUFFERED=1
+USER postgres
+# The Postgres image stops with SIGINT, which Python reports as a KeyboardInterrupt traceback; SIGTERM stops it quietly.
+STOPSIGNAL SIGTERM
+ENTRYPOINT []
+CMD ["python3", "-m", "support_agent.backup_job"]

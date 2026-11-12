@@ -1,0 +1,28 @@
+{# The Add staff panel: the <dialog> alone. staff.html includes it over the list; panel_alone.html
+   carries it by itself for a refused form. The title is an h2, under the page's h1 (Staff). #}
+{% macro invalid(field) %}{% if errors[field] %} aria-invalid="true"{% endif %}{% endmacro %}
+{# email_off: Cloudflare leaves the address inside alone, or live shows "[email protected]" (its script can't run under our header). #}
+{% macro field_error(field, id) %}<span class="ds-form-field__error" id="{{ id }}"><!--email_off-->{{ errors[field] }}<!--/email_off--></span>{% endmacro %}
+    <dialog class="ds-sheet" id="panel" open aria-labelledby="staff-title">
+      <div class="ds-sheet__grabber" aria-hidden="true"></div>
+      <div class="ds-sheet__head">
+        <div class="ds-sheet__heading">
+          <h2 class="ds-sheet__title" id="staff-title" tabindex="-1">Add staff</h2>
+        </div>
+        <a class="ds-button ds-button--icon ds-button--tonal" href="/staff" aria-label="Close panel"><svg aria-hidden="true"><use href="#i-x"/></svg></a>
+      </div>
+      <div class="ds-sheet__body">
+        <form class="ds-sheet__section" method="post" action="/staff/new" novalidate aria-labelledby="staff-title">
+          {% include "staff_fields.html" %}
+          {# Remove when the system is handed over: the agency sets up its own Access list then. #}
+          <p class="ds-form-field__help">During the practice build, also add their email to the Cloudflare Access list.</p>
+          {% if error %}
+          <div class="ds-alert ds-alert--fail" role="alert"><svg aria-hidden="true"><use href="#i-x"/></svg><div class="ds-alert__body">{{ error }}</div></div>
+          {% endif %}
+          <div class="ds-sheet__actions">
+            <button type="submit" class="ds-button ds-button--accent">Add staff</button>
+            <a class="ds-button ds-button--plain" href="/staff">Cancel</a>
+          </div>
+        </form>
+      </div>
+    </dialog>

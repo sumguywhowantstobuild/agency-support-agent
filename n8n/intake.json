@@ -1,0 +1,894 @@
+{
+  "name": "Ticket intake",
+  "nodes": [
+    {
+      "parameters": {
+        "trigger": [
+          "message"
+        ],
+        "watchWorkspace": true,
+        "options": {}
+      },
+      "type": "n8n-nodes-base.slackTrigger",
+      "typeVersion": 1,
+      "position": [
+        -2960,
+        176
+      ],
+      "id": "0fab209f-3c94-4e89-9bb8-6e6294ede85d",
+      "name": "Slack message",
+      "webhookId": "79fee83d-dee4-406a-aa72-129aaf557c1e",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "assignments": {
+          "assignments": [
+            {
+              "id": "03ee1601-667b-4cff-9d86-2e800aa7254c",
+              "name": "support_queue_channel",
+              "value": "PASTE_SUPPORT_QUEUE_CHANNEL_ID",
+              "type": "string"
+            },
+            {
+              "id": "563da403-4ac8-4646-97b3-158d15fec4db",
+              "name": "agent_url",
+              "value": "http://agent:8000/draft",
+              "type": "string"
+            },
+            {
+              "id": "589de4ff-c9bc-403f-a02a-0cbc0b71093e",
+              "name": "slack_workspace_url",
+              "value": "PASTE_SLACK_WORKSPACE_URL",
+              "type": "string"
+            },
+            {
+              "id": "4559765d-6bd7-47ec-a31e-6cd2caedaab2",
+              "name": "alerts_channel",
+              "value": "PASTE_ALERTS_CHANNEL_ID",
+              "type": "string"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.5,
+      "position": [
+        -2736,
+        176
+      ],
+      "id": "6c6c0d4f-34b2-4666-bc5c-bd491730822f",
+      "name": "Settings"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Is this Slack message a client's ticket (or a follow-up in a ticket's thread)? If yes, pull out what the next\n// steps need. Anything else returns nothing, which ends the run quietly: our bot's own posts,\n// edits, deletions, join notices and chat in #support-queue. Messages from the agency's own staff end at the next\n// step, which checks the staff list in the database.\nconst s = $('Settings').first().json;\nfor (const [name, value] of Object.entries(s)) {\n  if (!String(value ?? '').trim() || String(value).startsWith('PASTE_')) {\n    throw new Error(`Settings: ${name} is not filled in. No ticket was made.`);\n  }\n}\nconst e = $('Slack message').first().json;\n\n// A plain message, one with a file, or a thread reply also sent to the channel.\nconst CLIENT_SUBTYPES = [undefined, 'file_share', 'thread_broadcast'];\nif (e.type !== 'message') return [];\nif (e.bot_id || e.app_id) return []; // our bot, or any other app: never a ticket\nif (!CLIENT_SUBTYPES.includes(e.subtype)) return []; // edits, deletions, joins, channel notices\nif (!e.user) return [];\nif (e.channel === s.support_queue_channel) return [];\n\nreturn [{\n  json: {\n    channel_id: e.channel,\n    thread_ts: e.thread_ts ?? e.ts, // a reply belongs to its thread; a new message starts one\n    message_key: `${e.channel}:${e.ts}`, // unique per Slack message (the trigger doesn't pass Slack's event ID)\n    slack_user: e.user,\n    text: (e.text ?? '').trim(), // may be empty (a screenshot only): the agent then hands it to a person\n    has_files: Array.isArray(e.files) && e.files.length > 0,\n  },\n}];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -2512,
+        176
+      ],
+      "id": "263b7d18-cbb5-4b61-9a03-eb85b3cd18df",
+      "name": "Read message"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The channel decides the client (and so the GHL account), never the AI. An unknown channel, or a removed client's\n-- (the bot should have left it), still returns one\n-- row, of nulls, so the next step can raise the alert. A message from the agency's own staff (active members of the\n-- staff list) returns no row, which ends the run quietly: the agency talking, not the client.\n-- Values in order: 1 channel, 2 Slack user\nselect c.client_key, c.display_name, c.location_id,\n       coalesce((select array_agg(o.display_name order by o.display_name)\n                 from client_map o where o.channel_id <> $1), '{}') as other_client_names\nfrom (select 1) as one\nleft join client_map c on c.channel_id = $1 and c.status <> 'removed'\nwhere not is_staff($2);",
+        "options": {
+          "queryReplacement": "={{ [ $json.channel_id, $json.slack_user ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -2288,
+        176
+      ],
+      "id": "20da27c3-c683-4577-80c2-d4e9b1fa1e86",
+      "name": "Find client",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1f942cf4-8d19-49aa-a440-a9b46fc04af7",
+              "leftValue": "={{ !!$json.client_key }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -2064,
+        176
+      ],
+      "id": "7ff01be3-ee9e-4ef4-86a5-022c1a90dab8",
+      "name": "Known client?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Settings').first().json.alerts_channel }}",
+          "mode": "id"
+        },
+        "text": "=:warning: A message arrived in <#{{ $('Read message').first().json.channel_id }}> (`{{ $('Read message').first().json.channel_id }}`), which isn't linked to a current client in `client_map` (unknown, or the client was removed: remove the bot from that channel). No ticket was made, and the message isn't shown here.",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        -1840,
+        272
+      ],
+      "id": "63a35191-65f2-40d5-a59a-90c9b99ea6e2",
+      "name": "Alert: unknown channel",
+      "webhookId": "77fa4685-cf18-469f-b994-331bd8498889",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- One statement: a reply in a known ticket's thread is added to that ticket; anything else opens a new ticket.\n-- A message Slack delivers twice matches a unique key and returns no row, so the workflow stops there.\n-- Values in order: 1 channel, 2 thread, 3 message key (channel:ts), 4 client key, 5 location, 6 text, 7 Slack user\nwith existing as (\n  select id, text, slack_event_id from tickets where channel_id = $1 and thread_ts = $2\n),\nnew_ticket as (\n  insert into tickets (slack_event_id, channel_id, thread_ts, client_key, location_id, text)\n  select $3, $1, $2, $4, $5, $6\n  where not exists (select 1 from existing)\n  on conflict do nothing\n  returning id, text\n),\nfollow_up as (\n  insert into ticket_messages (ticket_id, slack_key, slack_user, text)\n  select id, $3, $7, $6 from existing\n  where slack_event_id <> $3  -- the opening message delivered again is not a follow-up\n  on conflict (slack_key) do nothing\n  returning ticket_id\n),\nsaved as (\n  select id as ticket_id, 'new' as kind, text as full_text from new_ticket\n  union all\n  -- The whole conversation so far for the agent: opening message, earlier follow-ups, then this one.\n  select e.id, 'follow_up',\n         e.text\n         || coalesce((select string_agg(E'\\n\\nFollow-up from the client:\\n' || m.text, '' order by m.created_at)\n                      from ticket_messages m where m.ticket_id = e.id), '')\n         || E'\\n\\nFollow-up from the client:\\n' || $6\n  from follow_up f join existing e on e.id = f.ticket_id\n)\nselect s.ticket_id, s.kind, s.full_text,\n       (select d.status from drafts d where d.ticket_id = s.ticket_id order by d.created_at desc limit 1) as last_status\nfrom saved s;",
+        "options": {
+          "queryReplacement": "={{ [ $('Read message').first().json.channel_id, $('Read message').first().json.thread_ts, $('Read message').first().json.message_key, $('Find client').first().json.client_key, $('Find client').first().json.location_id, $('Read message').first().json.text, $('Read message').first().json.slack_user ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -1840,
+        80
+      ],
+      "id": "00704cce-3e1d-486b-a31e-7f02626092ab",
+      "name": "Save message",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "a9b6896f-02c3-4b45-a2e7-2af67daa6fdc",
+              "leftValue": "={{ !['taken_over', 'test_closed'].includes($json.last_status) }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1616,
+        80
+      ],
+      "id": "2ce51236-0f9e-4b81-a4a1-44d2782851d5",
+      "name": "Draft needed?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Before any AI call: may this client have another draft? (per-client limit per 60 minutes, migration 008)\nselect * from claim_draft_slot($1);",
+        "options": {
+          "queryReplacement": "={{ [ $('Find client').first().json.client_key ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -944,
+        80
+      ],
+      "id": "845e6b7b-27b5-4626-8b3c-2372980a3808",
+      "name": "Claim slot",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1723af72-23dd-45c2-b154-c7966201643c",
+              "leftValue": "={{ $json.draft_allowed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -720,
+        80
+      ],
+      "id": "c97b9eed-f003-48f2-bff6-a0c98954473d",
+      "name": "Within limit?"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $('Settings').first().json.agent_url }}",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ ticket_id: $('Save message').first().json.ticket_id, client_key: $('Find client').first().json.client_key, location_id: $('Find client').first().json.location_id, text: $('Save message').first().json.full_text, other_client_names: $('Find client').first().json.other_client_names }) }}",
+        "options": {
+          "timeout": 90000
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.5,
+      "position": [
+        -496,
+        -16
+      ],
+      "id": "e1331dc8-083b-4a96-bf03-6cef25313cc2",
+      "name": "Ask the agent",
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "PASTE_CREDENTIAL_ID_AGENT_API",
+          "name": "Agent API"
+        }
+      },
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- The agent's draft, waiting for a person (Build card and Post card put it in #support-queue).\ninsert into drafts (ticket_id, draft) values ($1::uuid, $2::jsonb)\nreturning id as draft_id, ticket_id, status, draft;",
+        "options": {
+          "queryReplacement": "={{ [ $('Save message').first().json.ticket_id, JSON.stringify($json) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -272,
+        -112
+      ],
+      "id": "4c3c3421-7c22-4aa0-9f96-e0ac936b023e",
+      "name": "Save draft",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- No draft: the agent didn't answer within 90 s, was busy (503) or failed. A person takes it (Post card posts it).\ninsert into drafts (ticket_id, draft, status)\nvalues ($1::uuid, jsonb_build_object('error', $2::text), 'agent_unavailable')\nreturning id as draft_id, ticket_id, status, draft;",
+        "options": {
+          "queryReplacement": "={{ [ $('Save message').first().json.ticket_id, String($json.error?.message ?? JSON.stringify($json.error ?? 'unknown error')).slice(0, 300) ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -272,
+        80
+      ],
+      "id": "1aaba02c-c150-415f-9d10-faf636810def",
+      "name": "Save 'agent unavailable'",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the saved draft into its card for #support-queue. Everything the client or the AI wrote is escaped, so text\n// like <!channel> or a disguised link shows as plain text: it can't ping everyone or hide where a link goes.\nconst s = $('Settings').first().json;\nconst row = $input.first().json; // the saved draft: draft_id, ticket_id, status, draft\nconst client = $('Find client').first().json;\nconst msg = $('Read message').first().json;\nconst ticket = $('Save message').first().json;\n// Why there's no draft, in plain words for the support team; the exact error stays in the database.\nconst why = (err) => {\n  const e = String(err ?? '');\n  if (/ENOTFOUND|ECONNREFUSED|ECONNRESET|EAI_AGAIN/.test(e)) return \"the agent isn't running\";\n  if (/timeout|ECONNABORTED|ETIMEDOUT/i.test(e)) return 'the agent took longer than 90 seconds';\n  const tooLong = e.match(/ticket too long: (\\d+) characters, limit (\\d+)/);\n  if (tooLong) return `the message is too long for the agent (${Number(tooLong[1]).toLocaleString('en-US')} characters; it takes up to ${Number(tooLong[2]).toLocaleString('en-US')})`;\n  if (/ai spending limit reached/.test(e)) return \"the AI account's spending limit or prepaid credit ran out (see #support-alerts)\";\n  if (/^503\\b/.test(e)) return 'the agent was busy with other tickets';\n  if (/^401\\b/.test(e)) return \"the agent refused n8n's key (check the Agent API login in n8n)\";\n  return 'the agent ran into an error (details in n8n)';\n};\n// A pause reason as the admin app shows it (admin/clients.py, PAUSE_REASONS).\nconst PAUSE_LABELS = {\n  key_broken: 'Key broken',\n  drafts_wrong: 'Drafts going wrong',\n  account_changing: 'Account changing',\n  privacy_hold: 'Privacy hold',\n  client_asked: 'Client asked',\n  billing_hold: 'Billing hold',\n};\nconst esc = (t) => String(t ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');\nconst MAX = 2900; // Slack allows 3000 characters per section\nconst cut = (t) => (t.length > MAX ? t.slice(0, MAX - 1) + '…' : t);\nconst quote = (t) => esc(t).split('\\n').map((line) => '> ' + line).join('\\n');\nconst section = (text) => ({ type: 'section', text: { type: 'mrkdwn', text: cut(text) } });\n// Only plain https links become clickable; anything else is shown as text.\nconst safeUrl = (u) => /^https:\\/\\/[^\\s<>|]+$/.test(String(u ?? ''));\nconst button = (text, actionId, style) => ({\n  type: 'button',\n  text: { type: 'plain_text', text },\n  action_id: actionId,\n  value: row.draft_id, // the buttons (Ticket approval workflow) act on this draft only\n  ...(style ? { style } : {}),\n});\n\nconst name = esc(client.display_name);\nconst threadLink = `${s.slack_workspace_url.replace(/\\/+$/, '')}/archives/${msg.channel_id}/p${msg.thread_ts.replace('.', '')}`;\nconst header = `*🎫 ${name}*`;\nconst clientWrote = `*Client wrote:*\\n${ticket.full_text.trim() ? quote(ticket.full_text) : '_No text: a file or screenshot only._'}`;\n\nlet text;\nlet blocks;\nif (row.status === 'agent_unavailable') {\n  text = `Agent unavailable for ${name}: needs a person`;\n  blocks = [\n    section(`${header} · <${threadLink}|open the client's thread>`),\n    section(`:rotating_light: *Agent unavailable, needs a person.* No draft was made because ${why(row.draft?.error)}. Please answer the client yourself.`),\n    section(clientWrote),\n    { type: 'actions', block_id: 'draft_actions', elements: [button('Take over', 'take_over', 'primary')] },\n  ];\n} else if (row.status === 'limit_reached') {\n  text = `Limit reached for ${name}: needs a person`;\n  blocks = [\n    section(`${header} · <${threadLink}|open the client's thread>`),\n    section(`:no_entry: *Limit reached, needs a person.* ${name} has had ${esc(row.draft?.limit)} drafts in the last 60 minutes, so no draft was made (no AI call). Please answer the client yourself.`),\n    section(clientWrote),\n    { type: 'actions', block_id: 'draft_actions', elements: [button('Take over', 'take_over', 'primary')] },\n  ];\n} else if (row.status === 'client_paused') {\n  const reason = esc(PAUSE_LABELS[row.draft?.paused] ?? row.draft?.paused);\n  text = `Paused: answer by hand · ${reason} · ${name}`;\n  blocks = [\n    section(`${header} · <${threadLink}|open the client's thread>`),\n    section(`:double_vertical_bar: *Paused: answer by hand* · ${reason}. ${name} is paused in the admin app, so no draft was made (no AI call). Please answer the client yourself.`),\n    section(clientWrote),\n    { type: 'actions', block_id: 'draft_actions', elements: [button('Take over', 'take_over', 'primary')] },\n  ];\n} else {\n  const d = row.draft;\n  text = `New draft for ${name} (confidence: ${esc(d.confidence)})`;\n  blocks = [section(`${header} · confidence: *${esc(d.confidence)}* · <${threadLink}|open the client's thread>`)];\n  if (d.needs_person) blocks.push(section(`:warning: *Needs a person:* ${esc(d.needs_person_reason)}`));\n  if (d.suspicious_sources?.length) blocks.push(section(`:warning: *A source may have been tampered with:* ${d.suspicious_sources.map(esc).join(' · ')}. It holds a line aimed at the AI, which the draft left out. Please check that source and clean it up (run guide, section 3).`));\n  if (d.checks_failed?.length) blocks.push(section(`:no_entry: *Checks failed:* ${d.checks_failed.map(esc).join(' · ')}`));\n  blocks.push(section(clientWrote));\n  blocks.push(section(`*Reply to send:*\\n${quote(d.client_reply)}`));\n  blocks.push(section(`*Likely cause:* ${esc(d.likely_cause)}`));\n  if (d.fix_steps?.length) blocks.push(section(`*Fix steps:*\\n${d.fix_steps.map((x, i) => `${i + 1}. ${esc(x)}`).join('\\n')}`));\n  if (d.evidence?.length) blocks.push(section(`*Evidence:*\\n${d.evidence.map((x) => `• ${esc(x)}`).join('\\n')}`));\n  if (d.sources?.length) {\n    const links = d.sources.map((x) => (safeUrl(x.url) ? `<${x.url}|${esc(x.title)}>` : esc(x.title)));\n    blocks.push(section(`*Sources:* ${links.join(' · ')}`));\n  }\n  // Which lookups the agent made, in order (names only, never what it asked or found), so staff see why it says what it says.\n  if (d.checks_ran?.length) {\n    // An empty GHL check is not proof that nothing is there (missing access looks the same), so it never says nothing found.\n    const SEARCHES = ['search_guides', 'search_ghl_help', 'find_similar_tickets'];\n    const how = (c) => (c.result === 'error' ? ' (failed)' : c.result !== 'empty' ? '' : SEARCHES.includes(c.name) ? ' (nothing found)' : ' (came back empty)');\n    blocks.push(section(`*Looked up:* ${d.checks_ran.map((c) => esc(String(c.name).replace(/_/g, ' ')) + how(c)).join(' · ')}`));\n  }\n  blocks = [\n    ...blocks,\n    {\n      type: 'actions',\n      block_id: 'draft_actions',\n      elements: [button('Approve and send', 'approve', 'primary'), button('Edit', 'edit'), button('Take over', 'take_over')],\n    },\n  ];\n}\nreturn [{ json: { draft_id: row.draft_id, text, blocks: JSON.stringify({ blocks }) } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        80
+      ],
+      "id": "9e933ff3-f777-4d7b-9b40-4ea9f4b667bd",
+      "name": "Build card"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ $json.blocks }}",
+        "text": "={{ $json.text }}",
+        "otherOptions": {
+          "includeLinkToWorkflow": false,
+          "unfurl_links": false,
+          "unfurl_media": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        176,
+        80
+      ],
+      "id": "46ae17f4-e2f6-4ac7-a3b1-84fccba8126f",
+      "name": "Post card",
+      "webhookId": "82eca567-f507-43ac-bcf6-3b0c280a5f3f",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Remember where this draft's card sits, and mark the ticket's older open drafts \"replaced\" (they can no longer be\n-- approved). Returns the older cards, so the next step can cross them out in Slack.\nwith card as (\n  update drafts set queue_ts = $2 where id = $1::uuid returning id, ticket_id, created_at\n),\nreplaced as (\n  update drafts d set status = 'replaced'\n  from card\n  where d.ticket_id = card.ticket_id and d.id <> card.id\n    and d.created_at < card.created_at and d.status in ('pending', 'agent_unavailable', 'limit_reached', 'client_paused')\n  returning d.queue_ts\n)\nselect queue_ts from replaced where queue_ts is not null;",
+        "options": {
+          "queryReplacement": "={{ [ $('Build card').first().json.draft_id, $json.message_timestamp ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        400,
+        80
+      ],
+      "id": "73fcb2e8-db6f-469b-9737-9255544a449a",
+      "name": "Remember card",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "update",
+        "channelId": {
+          "__rl": true,
+          "mode": "id",
+          "value": "={{ $('Settings').first().json.support_queue_channel }}"
+        },
+        "ts": "={{ $json.queue_ts }}",
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: [{ type: \"section\", text: { type: \"mrkdwn\", text: \":arrows_counterclockwise: *Replaced by a newer draft.* The client added more to this ticket; use the newest card.\" } }] }) }}",
+        "text": "Replaced by a newer draft",
+        "updateFields": {},
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        624,
+        80
+      ],
+      "id": "ca3f29af-cece-4263-9cea-e0f5f60aebe9",
+      "name": "Cross out old card",
+      "webhookId": "6956ade1-008a-4f71-94f7-dccc6cf66ab4",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Over the client's hourly limit: no AI call. A person takes it from the \"limit reached\" card.\ninsert into drafts (ticket_id, draft, status)\nvalues ($1::uuid, jsonb_build_object('limit', $2::integer), 'limit_reached')\nreturning id as draft_id, ticket_id, status, draft;",
+        "options": {
+          "queryReplacement": "={{ [ $('Save message').first().json.ticket_id, $('Claim slot').first().json.hourly_limit ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -272,
+        272
+      ],
+      "id": "7d2284d5-5611-464d-a65f-77f1bca08ece",
+      "name": "Save 'limit reached'",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "1f88afc8-8dbb-4819-b47a-fd5023992355",
+              "leftValue": "={{ $('Claim slot').first().json.alert_needed }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -48,
+        368
+      ],
+      "id": "e8b389c4-3dab-42d0-a2df-6378d202add4",
+      "name": "Alert needed?"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "value": "={{ $('Settings').first().json.alerts_channel }}",
+          "mode": "id"
+        },
+        "messageType": "block",
+        "blocksUi": "={{ JSON.stringify({ blocks: [{ type: 'section', text: { type: 'mrkdwn', text: ':no_entry: *' + $('Find client').first().json.display_name + '* reached its limit of ' + $('Claim slot').first().json.hourly_limit + ' drafts in 60 minutes. Until the hour clears, its new messages get \"limit reached, needs a person\" cards in the support queue, with no AI call. Busy day? Change the limit below. Looks like spam or misuse? Check the client\\'s channel. This alert repeats at most once an hour.' } }, { type: 'actions', block_id: 'limit_actions', elements: [{ type: 'button', text: { type: 'plain_text', text: 'Change limit' }, action_id: 'change_limit', value: $('Find client').first().json.client_key }] }] }) }}",
+        "text": "={{ $('Find client').first().json.display_name }} reached its limit of {{ $('Claim slot').first().json.hourly_limit }} drafts in 60 minutes",
+        "otherOptions": {
+          "includeLinkToWorkflow": false
+        }
+      },
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.7,
+      "position": [
+        176,
+        368
+      ],
+      "id": "33e8dcfd-700d-46e0-9fe3-cabee0c8035c",
+      "name": "Alert: limit reached",
+      "webhookId": "b3a68326-be9e-49f9-92be-bce85cfa368e",
+      "credentials": {
+        "slackApi": {
+          "id": "PASTE_CREDENTIAL_ID_SLACK_BOT",
+          "name": "Slack bot"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 3
+          },
+          "conditions": [
+            {
+              "id": "4915378e-09fb-4ecd-ba09-f0e5f028c623",
+              "leftValue": "={{ $json.status === 'paused' }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.3,
+      "position": [
+        -1168,
+        80
+      ],
+      "id": "2c84007a-998b-441c-88d5-4de582c4374a",
+      "name": "Client paused?"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- A paused client (admin app): no draft slot and no AI call. A person answers by hand from the \"paused\" card.\n-- Values in order: 1 ticket, 2 pause reason\ninsert into drafts (ticket_id, draft, status)\nvalues ($1::uuid, jsonb_build_object('paused', $2::text), 'client_paused')\nreturning id as draft_id, ticket_id, status, draft;",
+        "options": {
+          "queryReplacement": "={{ [ $('Save message').first().json.ticket_id, $('Client status now').first().json.pause_reason ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -944,
+        272
+      ],
+      "id": "962fad5a-98be-4e15-9a6d-84b7d209f852",
+      "name": "Save 'client paused'",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "-- Is the client paused? Read again here, after the ticket is saved, not taken from Find client: a pause made in\n-- between still gets the \"paused\" card. Always one row. A client removed meanwhile comes back as \"removed\" and\n-- goes on to the agent, whose own fresh key lookup refuses it before any AI call (a split-second case, accepted).\n-- Values in order: 1 channel\nselect c.status, c.pause_reason from (select 1) as one left join client_map c on c.channel_id = $1;",
+        "options": {
+          "queryReplacement": "={{ [ $('Read message').first().json.channel_id ] }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.7,
+      "position": [
+        -1392,
+        80
+      ],
+      "id": "3bc116d5-55d1-460f-b0fd-7b689142e55f",
+      "name": "Client status now",
+      "credentials": {
+        "postgres": {
+          "id": "PASTE_CREDENTIAL_ID_SUPPORT_DB",
+          "name": "Support DB (n8n_support)"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Slack message": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Read message",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read message": {
+      "main": [
+        [
+          {
+            "node": "Find client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Find client": {
+      "main": [
+        [
+          {
+            "node": "Known client?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Known client?": {
+      "main": [
+        [
+          {
+            "node": "Save message",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert: unknown channel",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save message": {
+      "main": [
+        [
+          {
+            "node": "Draft needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Draft needed?": {
+      "main": [
+        [
+          {
+            "node": "Client status now",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claim slot": {
+      "main": [
+        [
+          {
+            "node": "Within limit?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Within limit?": {
+      "main": [
+        [
+          {
+            "node": "Ask the agent",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save 'limit reached'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask the agent": {
+      "main": [
+        [
+          {
+            "node": "Save draft",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Save 'agent unavailable'",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save draft": {
+      "main": [
+        [
+          {
+            "node": "Build card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save 'agent unavailable'": {
+      "main": [
+        [
+          {
+            "node": "Build card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build card": {
+      "main": [
+        [
+          {
+            "node": "Post card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Post card": {
+      "main": [
+        [
+          {
+            "node": "Remember card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Remember card": {
+      "main": [
+        [
+          {
+            "node": "Cross out old card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save 'limit reached'": {
+      "main": [
+        [
+          {
+            "node": "Build card",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Alert needed?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert needed?": {
+      "main": [
+        [
+          {
+            "node": "Alert: limit reached",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client paused?": {
+      "main": [
+        [
+          {
+            "node": "Save 'client paused'",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Claim slot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Save 'client paused'": {
+      "main": [
+        [
+          {
+            "node": "Build card",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Client status now": {
+      "main": [
+        [
+          {
+            "node": "Client paused?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "timeSavedMode": "fixed",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false
+  },
+  "meta": {},
+  "tags": []
+}

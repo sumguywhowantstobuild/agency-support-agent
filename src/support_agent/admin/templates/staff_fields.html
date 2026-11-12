@@ -1,0 +1,20 @@
+{# The three fields Add staff and the staff sheet share; invalid() and field_error() come from the page. #}
+          <div class="ds-card ds-card--group">
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="staff-name">Name</label>
+              <input class="ds-text-input" id="staff-name" name="name" autocomplete="off" maxlength="80" value="{{ form.name }}"{{ invalid("name") }} aria-describedby="staff-name-error">
+              {{ field_error("name", "staff-name-error") }}
+            </div>
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="staff-email">Work email</label>
+              <input class="ds-text-input" id="staff-email" name="email" type="email" autocomplete="off" spellcheck="false" maxlength="254" value="{{ form.email }}"{{ invalid("email") }} aria-describedby="staff-email-help staff-email-error">
+              <span class="ds-form-field__help" id="staff-email-help">The one they sign in with.</span>
+              {{ field_error("email", "staff-email-error") }}
+            </div>
+            <div class="ds-form-field ds-form-field--grouped">
+              <label class="ds-form-field__label" for="staff-slack">Slack member ID</label>
+              <input class="ds-text-input ds-text-input--mono" id="staff-slack" name="slack_user_id" autocomplete="off" spellcheck="false" autocapitalize="characters" value="{{ form.slack_user_id }}"{{ invalid("slack_user_id") }} aria-describedby="staff-slack-help staff-slack-error">
+              <span class="ds-form-field__help" id="staff-slack-help">In Slack: their profile, the ⋮ button, Copy member ID. Starts with U or W.</span>
+              {{ field_error("slack_user_id", "staff-slack-error") }}
+            </div>
+          </div>

@@ -1,0 +1,8 @@
+{# A form refused with its panel (422, 409, 429, the 503 for Slack): the panel and the toast, not the list. The list needs
+   the database, and a database failure must not lose what was typed. The toast is here so admin.js starts. #}
+{% extends "base.html" %}
+{% block title %}{{ page_title }} · Bluejay support admin{% endblock %}
+{% block content %}
+{% include panel %}
+{% include "toast.html" %}
+{% endblock %}

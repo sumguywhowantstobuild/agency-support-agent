@@ -1,0 +1,4 @@
+# Shell scripts keep Linux line endings everywhere, or bash fails on a Windows checkout.
+*.sh text eol=lf
+# The motion script is the same on every machine (test_look_rules holds it to this).
+src/support_agent/admin/static/ds/ds-motion.js text eol=lf
