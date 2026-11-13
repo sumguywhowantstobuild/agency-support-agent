@@ -544,6 +544,9 @@ def test_ctrl_click_stays_the_browsers(page):
         name_link(page, "Cedarline Roofing").click(modifiers=["Control"])
 
     other = opened.value
+    # The new tab opens on about:blank and only then goes to the client; a reload sent before that first load lands
+    # is aborted ("not attached to an active page"), so wait for the tab to reach the client's address first.
+    other.wait_for_url(CEDARLINE)
     other.reload()  # WebKit leaves the context's sign-in header off a ctrl-click tab's first request (the real pass comes from Cloudflare)
     expect(other.locator("dialog:modal")).to_have_count(1)  # a new tab shows the panel over its own list
     expect(other).to_have_url(CEDARLINE)
