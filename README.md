@@ -1,5 +1,7 @@
 # Agency support agent
 
+[![checks](https://github.com/sumguywhowantstobuild/agency-support-agent/actions/workflows/checks.yml/badge.svg)](https://github.com/sumguywhowantstobuild/agency-support-agent/actions/workflows/checks.yml)
+
 An AI agent that drafts answers to client tech-support tickets for a GoHighLevel (GHL) marketing agency. A client
 posts a problem in their Slack channel; the agent checks that client's GHL account (read-only), searches the agency's
 own guides, GHL help summaries and past tickets, and drafts the likely cause, the fix steps and a plain-English reply.
@@ -45,14 +47,20 @@ limits: [`evals/README.md`](evals/README.md).
 Setup from scratch, every account it needs and how changes go live: [`docs/SETUP.md`](docs/SETUP.md). Release
 history: [`CHANGELOG.md`](CHANGELOG.md).
 
-Tests (Python 3.11, [uv](https://docs.astral.sh/uv/), Node 22+ for the motion script's tests; the browser tests use
-Playwright in Chromium, Firefox and WebKit):
+Tests (Python 3.11, [uv](https://docs.astral.sh/uv/), Node 22+ for the workflow and motion script tests; the browser
+tests use Playwright, in Chromium only unless more browsers are named):
 
 ```bash
 uv sync
 uv run playwright install
-uv run pytest -q -n 4
+uv run pytest -q -n 4 --browser chromium --browser firefox --browser webkit
 ```
+
+Every pull request and every change to `main` runs the same suite in all three browsers on GitHub Actions, plus a lint
+pass (Ruff), a leaked-key scan of the whole history (gitleaks) and a scan of the locked libraries for known
+vulnerabilities (pip-audit); a weekly run catches newly published ones. Dependabot proposes library and action
+updates. To run the leaked-key scan and lint before each commit as well: `uv tool install pre-commit`, then
+`pre-commit install`.
 
 ## Security
 

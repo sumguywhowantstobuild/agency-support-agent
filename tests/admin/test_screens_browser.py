@@ -300,8 +300,10 @@ def test_tab_reaches_every_control_with_its_focus_ring_in_view(open_screen, brow
     # Safari's Tab skips links unless its "Press Tab to highlight each item" is on, and Playwright's WebKit can't turn
     # that on: there Tab must reach every other control, and Chromium and Firefox check the links.
     expected = set(page.evaluate(CONTROLS, browser_name == "webkit"))
+    # Enough presses for every control, links included: WebKit on Linux does stop on links.
+    presses = page.evaluate("document.querySelectorAll('[data-stop]').length") + 5
     reached, problems = [], []
-    for _ in range(len(expected) + 5):
+    for _ in range(presses):
         page.keyboard.press("Tab")
         now = page.evaluate(FOCUSED)
         if now is None or now["stop"] in reached:

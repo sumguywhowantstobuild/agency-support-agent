@@ -1,0 +1,32 @@
+# Weekly update pull requests for the Python libraries and the check tools. Each goes through the checks like any
+# other change. A release must be a week old first (cooldown): broken or tampered releases are usually caught within
+# days. Security fixes skip the wait.
+#
+# Docker images are left out on purpose: the monthly routine in docs/SETUP.md section 12 updates them, because each
+# one is pinned by tag and digest in both compose files and deploy/images.py, scanned first, and tried on the test
+# copy before live; a pull request touching one file would only fail the pin checks.
+version: 2
+updates:
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      python-libraries:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    cooldown:
+      default-days: 7
+    groups:
+      check-tools:
+        patterns: ["*"]

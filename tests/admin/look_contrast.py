@@ -195,7 +195,8 @@ def _linear(colour: str) -> list[float]:
 
 def _oklab(rgb: list[float]) -> tuple[float, float, float]:
     r, g, b = rgb
-    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)
+    # l, m and s are OKLab's own names for the three cone responses
+    l = (0.4122214708 * r + 0.5363325363 * g + 0.0514459929 * b) ** (1 / 3)  # noqa: E741
     m = (0.2119034982 * r + 0.6806995451 * g + 0.1073969566 * b) ** (1 / 3)
     s = (0.0883024619 * r + 0.2817188376 * g + 0.6299787005 * b) ** (1 / 3)
     return (0.2104542553 * l + 0.7936177850 * m - 0.0040720468 * s,
