@@ -36,6 +36,9 @@ Client's Slack channel ──> n8n "Ticket intake" ──> agent (POST /draft) �
   with tested restores, a test copy every change passes through before live (`deploy/apply.sh`), image pinning by
   digest and vulnerability scans, and an outside watcher (Healthchecks.io).
 
+More: [architecture and the test behind each rule](docs/ARCHITECTURE.md) · [decision records](docs/adr/README.md) ·
+[security and threat model](SECURITY.md).
+
 ## Accuracy
 
 64 synthetic tickets (40 support problems, 24 attacks such as prompt injection) are scored by rule checks plus a
@@ -65,8 +68,8 @@ updates. To run the leaked-key scan and lint before each commit as well: `uv too
 ## Security
 
 Read-only access to client accounts, signed Slack requests, per-client rate limits, sealed client keys, a model that
-can't post anything itself, and a person on every reply. To report a problem, use GitHub's private vulnerability
-reporting on this repository.
+can't post anything itself, and a person on every reply. The threat model and how to report a problem:
+[`SECURITY.md`](SECURITY.md).
 
 ## Licence
 
